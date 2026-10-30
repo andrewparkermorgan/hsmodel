@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hsmodel"
+version = "0.1.0"
+description = "Hierarchical Housworth-Stahl crossover interference model: simulation, preprocessing and variational inference"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+	"numpy",
+	"scipy",
+	"matplotlib",
+	"jax",
+	"numpyro",
+	"optax",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+hsmodel = "hsmodel.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+	"slow: long-running tests (a full SVI fit, Monte Carlo calibration); deselect with -m 'not slow'",
+]

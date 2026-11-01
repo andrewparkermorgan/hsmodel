@@ -43,17 +43,20 @@ from .model import GLOBALS, CHROM_SITES, globals_used, sample_globals, as_covari
 # ---------------------------------------------------------------------------
 # Model (full data, no subsampling)
 # ---------------------------------------------------------------------------
-def model(data, Lc, z, chrom_effects=True, chrom_centered=False):
+def model(data, Lc, z, chrom_effects=True, chrom_centered=False, parent_effects=True):
 	"""data: hsmodel.likelihood.group_by_count layout with one parent per index; Lc [C];
 	z [P, K] standardized covariates (1-D: one covariate)."""
 	z = z[:, None] if z.ndim == 1 else z
 	P = z.shape[0]
-	g = sample_globals(chrom_effects, z.shape[1])
-	with numpyro.plate("parents", P):
-		e_p = numpyro.sample("e_p", dist.Normal(0.0, 1.0))
-		e_nu = numpyro.sample("e_nu", dist.Normal(0.0, 1.0))
-	lp = g["a_p"] + z @ g["b_p"] + jnp.exp(g["log_s_p"]) * e_p                 # [P]
-	ln = g["a_nu"] + z @ g["b_nu"] + jnp.exp(g["log_s_nu"]) * e_nu             # [P]
+	g = sample_globals(chrom_effects, z.shape[1], parent_effects)
+	lp = g["a_p"] + z @ g["b_p"]                                               # [P]
+	ln = g["a_nu"] + z @ g["b_nu"]
+	if parent_effects:
+		with numpyro.plate("parents", P):
+			e_p = numpyro.sample("e_p", dist.Normal(0.0, 1.0))
+			e_nu = numpyro.sample("e_nu", dist.Normal(0.0, 1.0))
+		lp = lp + jnp.exp(g["log_s_p"]) * e_p
+		ln = ln + jnp.exp(g["log_s_nu"]) * e_nu
 	if chrom_effects:
 		# centered: sample c directly; noncentered: sample c / t (site "<name>_decentered")
 		config = {} if chrom_centered else {n: LocScaleReparam(centered=0) for n in CHROM_SITES}
@@ -72,18 +75,20 @@ def parent_draws(samples, z):
 	z = as_covariate_matrix(z)
 	b_p = np.asarray(samples["b_p"]).reshape(len(samples["a_p"]), -1)             # [draws, K]
 	b_nu = np.asarray(samples["b_nu"]).reshape(len(samples["a_nu"]), -1)
-	p = 1 / (1 + np.exp(-(samples["a_p"][:, None] + b_p @ z.T
-	                      + np.exp(samples["log_s_p"])[:, None] * samples["e_p"])))
-	nu = 1 + np.exp(samples["a_nu"][:, None] + b_nu @ z.T
-	                + np.exp(samples["log_s_nu"])[:, None] * samples["e_nu"])
-	return p, nu
+	lp = samples["a_p"][:, None] + b_p @ z.T
+	ln = samples["a_nu"][:, None] + b_nu @ z.T
+	if "e_p" in samples:                                                        # parent effects fitted
+		lp = lp + np.exp(samples["log_s_p"])[:, None] * samples["e_p"]
+		ln = ln + np.exp(samples["log_s_nu"])[:, None] * samples["e_nu"]
+	return 1 / (1 + np.exp(-lp)), 1 + np.exp(ln)
 
 
 def svi_init_values(svi_params, chrom_centered=False):
 	"""Starting point for NUTS from an SVI fit on the same parents (guide means)."""
 	vals = {n: svi_params[f"{n}_loc"] for n in GLOBALS if f"{n}_loc" in svi_params}
-	vals["e_p"] = svi_params["e_p_loc"]
-	vals["e_nu"] = svi_params["e_nu_loc"]
+	if "e_p_loc" in svi_params:
+		vals["e_p"] = svi_params["e_p_loc"]
+		vals["e_nu"] = svi_params["e_nu_loc"]
 	for n, t in (("c_p", "log_t_p"), ("c_nu", "log_t_nu")):
 		if f"{n}_loc" in svi_params:
 			c = np.asarray(svi_params[f"{n}_loc"])
@@ -96,7 +101,7 @@ def svi_init_values(svi_params, chrom_centered=False):
 
 def run_nuts(data, Lc, z, chains=4, warmup=1000, samples=1000, target_accept=0.9,
              max_tree_depth=8, seed=0, init_values=None, chain_method="auto", progress_bar=None,
-             chrom_effects=True, chrom_centered=False):
+             chrom_effects=True, chrom_centered=False, parent_effects=True):
 	"""Returns the numpyro MCMC object (samples grouped by chain available).
 
 	Chains start at init_values (e.g. svi_init_values(...)) if given, otherwise
@@ -107,9 +112,10 @@ def run_nuts(data, Lc, z, chains=4, warmup=1000, samples=1000, target_accept=0.9
 	parent and chromosome effects."""
 	n_dev = jax.local_device_count()
 	init = init_to_value(values=init_values) if init_values is not None else init_to_median(num_samples=15)
-	kernel = NUTS(partial(model, chrom_effects=chrom_effects, chrom_centered=chrom_centered),
+	kernel = NUTS(partial(model, chrom_effects=chrom_effects, chrom_centered=chrom_centered,
+	                      parent_effects=parent_effects),
 	              target_accept_prob=target_accept, max_tree_depth=max_tree_depth, init_strategy=init,
-	              find_heuristic_step_size=True, dense_mass=[tuple(globals_used(chrom_effects))])
+	              find_heuristic_step_size=True, dense_mass=[tuple(globals_used(chrom_effects, parent_effects))])
 	if chain_method == "auto":
 		# Parallel chains on CPU host devices leaked memory in testing; sequential is
 		# safe and on a CPU about as fast as vectorized (which runs chains in lockstep).

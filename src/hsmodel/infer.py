@@ -34,7 +34,8 @@ def add_arguments(ap):
 	add_input_arguments(ap)
 	ap.add_argument("--steps", type=int, default=None,
 	                help="optimization steps (default: 400 x individuals / batch, i.e. ~400 updates per "
-	                     "individual)")
+	                     "individual; with --no-parent-effects there are no per-individual parameters and "
+	                     "fewer steps usually suffice)")
 	ap.add_argument("--guide-type", choices=["meanfield", "lowrank"], default="meanfield")
 	ap.add_argument("--lr", type=float, default=0.02, help="learning rate (default 0.02)")
 	ap.add_argument("--rank", type=int, default=4, help="rank of the low-rank guide's covariance (default 4)")
@@ -62,7 +63,7 @@ def run(a):
 	n_prod, n_xo = len(d["NXO"]), int(d["NXO"].sum())
 	batch = min(a.batch, P)
 	steps = a.steps if a.steps is not None else math.ceil(400 * P / batch)
-	print(data_summary(f, a.chrom_effects, a.standardize) + "\n"
+	print(data_summary(f, a.chrom_effects, a.standardize, a.parent_effects) + "\n"
 	      f"guide: {a.guide_type}{f' (rank {a.rank})' if a.guide_type == 'lowrank' else ''}; "
 	      f"{steps:,} steps of {batch} individuals (~{steps * batch / P:.0f} updates per individual); "
 	      f"lr {a.lr}; seed {a.seed}", file=sys.stderr, flush=True)
@@ -81,7 +82,7 @@ def run(a):
 		warnings.showwarning = lambda msg, *args, **kw: print(f"warning: {msg}", file=sys.stderr)
 		params, losses = fit(bt, f.z, steps=steps, lr=a.lr, seed=a.seed, log_every=max(1, steps // 10),
 		                     chrom_effects=a.chrom_effects, guide_type=a.guide_type, rank=a.rank,
-		                     covariate_names=names, log=sys.stderr)
+		                     covariate_names=names, log=sys.stderr, parent_effects=a.parent_effects)
 
 	# ---- results ---------------------------------------------------------------
 	truth_x = expand_truth(f.truth, len(names), names)

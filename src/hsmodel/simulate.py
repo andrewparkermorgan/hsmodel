@@ -129,9 +129,10 @@ def truth_sampled(truth):
 	"""A truth dict (natural-scale SDs) on the scale the model samples its
 	globals (log SDs; see hsmodel.model.GLOBALS); b_p and b_nu as K-vectors."""
 	b_p, b_nu = coefficient_vectors(truth)
-	return {"a_p": float(truth["a_p"]), "b_p": b_p, "log_s_p": float(np.log(truth["s_p"])),
-	        "log_t_p": float(np.log(truth["t_p"])), "a_nu": float(truth["a_nu"]), "b_nu": b_nu,
-	        "log_s_nu": float(np.log(truth["s_nu"])), "log_t_nu": float(np.log(truth["t_nu"]))}
+	np_log = lambda v: float(np.log(v)) if v > 0 else float("-inf")    # an SD of 0: no such effect
+	return {"a_p": float(truth["a_p"]), "b_p": b_p, "log_s_p": np_log(truth["s_p"]),
+	        "log_t_p": np_log(truth["t_p"]), "a_nu": float(truth["a_nu"]), "b_nu": b_nu,
+	        "log_s_nu": np_log(truth["s_nu"]), "log_t_nu": np_log(truth["t_nu"])}
 
 
 TRUTH_SAMPLED = truth_sampled(DEFAULT_TRUTH)

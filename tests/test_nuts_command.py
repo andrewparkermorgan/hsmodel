@@ -57,6 +57,19 @@ def test_short_run_simulated(sim):
 	assert (tmp / "n1_summary.png").exists()
 
 
+def test_short_run_without_parent_effects(sim):
+	tmp, path = sim
+	out = tmp / "n3"
+	r = run_cli(["nuts", "--data", path, "--parents", "6", "--no-parent-effects", "--no-chrom-effects",
+	             "--chains", "1", "--warmup", "15", "--samples", "15", "--out", out])
+	assert r.returncode == 0, r.stderr[-2000:]
+	assert "individual-specific effects:      not included" in r.stderr
+	rows = [l.split("\t")[0] for l in r.stdout.splitlines() if "\t" in l and not l.startswith("parameter")]
+	assert rows == ["a_p", "b_p[z1]", "b_p[z2]", "a_nu", "b_nu[z1]", "b_nu[z2]"]
+	s = np.load(f"{out}_samples.npz")
+	assert "e_p" not in s.files and "log_s_p" not in s.files and s["b_nu"].shape == (1, 15, 2)
+
+
 @pytest.mark.slow
 def test_short_run_preprocessed_with_svi_init(tmp_path):
 	"""Empirical-format data with sex-specific maps and a covariate file;

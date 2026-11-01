@@ -26,14 +26,16 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
     hsmodel preprocess  -m MAP [-i CROSSOVERS | -] -o data.npz [--cM]
     hsmodel infer       --data data.npz [--covariates covariates.txt] [--coefficients age,2]
                         [--steps N] [--guide-type meanfield|lowrank] [--lr 0.02] [--rank 4]
-                        [--seed 0] [--chrom-effects | --no-chrom-effects] [--batch 32]
+                        [--seed 0] [--chrom-effects | --no-chrom-effects]
+                        [--parent-effects | --no-parent-effects] [--batch 32]
                         [--standardize] [--out PREFIX]
     hsmodel nuts        --data data.npz [--covariates covariates.txt] [--coefficients ...]
                         [--parents K] [--chains 4] [--warmup 1000] [--samples 1000]
                         [--target-accept 0.9] [--max-tree-depth 8] [--svi-init [--svi-steps N]]
                         [--chrom-param noncentered|centered] [--k-terms 12] [--quad-nodes 64]
                         [--chain-method auto|sequential|vectorized|parallel] [--seed 0]
-                        [--chrom-effects | --no-chrom-effects] [--standardize] [--out PREFIX]
+                        [--chrom-effects | --no-chrom-effects] [--parent-effects | --no-parent-effects]
+                        [--standardize] [--out PREFIX]
 
 * **simulate** draws a dataset from the model, prints a summary (with
   stem-and-leaf plots of crossovers per meiotic product and of inter-crossover
@@ -56,6 +58,11 @@ covariate values from the data file, so no covariate file is needed. The
 simulated covariates are named `z1, z2, ...`. The true values are added to
 the tables and plots, except after `--standardize`, which changes the
 coefficients' scale.
+
+`--no-chrom-effects` drops the chromosome effects `c_p_c, c_nu_c` (and their
+SDs `t_p, t_nu`). `--no-parent-effects` drops the individual-specific effects
+`s_p e_p_i, s_nu e_nu_i`, so individuals then differ only through their
+covariates.
 
 `hsmodel COMMAND --help` lists every option.
 
@@ -97,8 +104,8 @@ setting the device count that `--chain-method parallel` needs.
 
 ## Tests
 
-    pytest                     # everything (~22 min on a 2-core CPU)
-    pytest -m "not slow"       # ~14 min; skips the full SVI fit, the Monte Carlo calibration and the longer NUTS run
+    pytest                     # everything (~30 min on a 2-core CPU)
+    pytest -m "not slow"       # skips the long SVI fits, the Monte Carlo calibration and the longer NUTS run
 
 The tests cover the likelihood (against simulation, closed forms and
 brute-force enumeration of labellings), the grouped likelihoods and their

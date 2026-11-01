@@ -198,3 +198,39 @@ def test_simulated_covariates_override_file(simulated, setup):
 def test_covariate_file_required_for_empirical_data(setup):
 	r = run_infer(setup, ["--steps", "5"])
 	assert r.returncode == 1 and "give a covariate file with --covariates" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# Without individual-specific effects
+# ---------------------------------------------------------------------------
+@pytest.mark.slow
+def test_no_parent_effects_recovers_truth(tmp_path):
+	"""Data simulated with no between-individual variation (s_p = s_nu = 0),
+	fitted without parent effects: no log_s_* or e_* parameters, and the
+	intervals of the remaining globals cover the truth."""
+	path = tmp_path / "sim0.npz"
+	r = run_cli(["simulate", "--parents", "60", "--s-p", "0", "--s-nu", "0", "--b-p", "0.4", "--b-nu", "0.2",
+	             "--seed", "5", "--out", path])
+	assert r.returncode == 0, r.stderr
+	out = tmp_path / "f0"
+	r = run_cli(["infer", "--data", path, "--no-parent-effects", "--steps", "1500", "--out", out])
+	assert r.returncode == 0, r.stderr[-2000:]
+	assert "individual-specific effects:      not included" in r.stderr
+	lines = [l.split("\t") for l in r.stdout.splitlines()]
+	head = next(l for l in lines if l[0] == "parameter")
+	rows = {l[0]: [float(v) for v in l[1:]] for l in lines if len(l) == len(head) and l[0] != "parameter"}
+	assert set(rows) == {"a_p", "b_p[z1]", "log_t_p", "a_nu", "b_nu[z1]", "log_t_nu"}
+	for key in ("a_p", "b_p[z1]", "a_nu", "b_nu[z1]", "log_t_nu"):
+		m, sd, lo, hi, truth = rows[key]
+		assert lo <= truth <= hi, (key, rows[key])
+	p = np.load(f"{out}_params.npz")
+	assert not any(k.startswith(("e_p", "e_nu", "log_s")) for k in p.files)
+
+
+def test_no_parent_effects_lowrank(setup):
+	r = run_infer(setup, ["--covariates", setup["cov"], "--standardize", "--no-parent-effects", "--guide-type",
+	                      "lowrank", "--rank", "2", "--steps", "20", "--out", setup["tmp"] / "f3"])
+	assert r.returncode == 0, r.stderr[-2000:]
+	p = np.load(setup["tmp"] / "f3_params.npz")
+	assert "local_loc" not in p.files and "e_p_loc" not in p.files and "glob_loc" in p.files
+	assert "log_s_p" not in r.stdout and "log_t_p" in r.stdout

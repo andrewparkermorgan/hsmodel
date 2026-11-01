@@ -99,7 +99,7 @@ def run(a):
 	d, P, names = f.d, f.P, f.names
 	n_prod = len(d["NXO"])
 	svi_steps = a.svi_steps if a.svi_steps is not None else math.ceil(400 * P / min(32, P))
-	print(data_summary(f, a.chrom_effects, a.standardize) + "\n"
+	print(data_summary(f, a.chrom_effects, a.standardize, a.parent_effects) + "\n"
 	      + (f"individuals used:                 the first {P:,} of {P_all:,}\n" if P < P_all else "")
 	      + f"sampler: NUTS, {a.chains} chain(s) x ({a.warmup} warmup + {a.samples} draws); "
 	        f"target accept {a.target_accept}; max tree depth {a.max_tree_depth}; chromosome effects "
@@ -142,7 +142,7 @@ def run(a):
 			                   seed=a.seed, parent_lengths=plengths)
 			svi_params, _ = svi_fit(bt, f.z, steps=svi_steps, lr=0.02, seed=a.seed,
 			                        log_every=max(1, svi_steps // 5), chrom_effects=a.chrom_effects,
-			                        covariate_names=names, log=sys.stderr)
+			                        covariate_names=names, log=sys.stderr, parent_effects=a.parent_effects)
 			del bt
 			jax.clear_caches()                  # release the compiled SVI step before NUTS compiles
 
@@ -151,7 +151,7 @@ def run(a):
 	mcmc = run_nuts(data, Lc, f.z, a.chains, a.warmup, a.samples, a.target_accept, a.max_tree_depth, a.seed,
 	                init_values=svi_init_values(svi_params, centered) if svi_params is not None else None,
 	                chain_method=a.chain_method, progress_bar=sys.stderr.isatty(),
-	                chrom_effects=a.chrom_effects, chrom_centered=centered)
+	                chrom_effects=a.chrom_effects, chrom_centered=centered, parent_effects=a.parent_effects)
 	jax.block_until_ready(mcmc.get_samples())          # JAX dispatches asynchronously
 	elapsed = time.time() - t0
 	extra = mcmc.get_extra_fields()

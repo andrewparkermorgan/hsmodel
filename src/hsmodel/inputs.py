@@ -143,6 +143,10 @@ def add_input_arguments(ap):
 	                help="standardize the selected covariates to mean 0, SD 1 before fitting")
 	ap.add_argument("--chrom-effects", action=argparse.BooleanOptionalAction, default=True,
 	                help="include chromosome-specific effects (default: yes; --no-chrom-effects to drop them)")
+	ap.add_argument("--parent-effects", action=argparse.BooleanOptionalAction, default=True,
+	                help="include individual-specific random effects e_p_i, e_nu_i and their SDs s_p, s_nu "
+	                     "(default: yes; --no-parent-effects to drop them, so that individuals differ only "
+	                     "through their covariates)")
 
 
 class FitInputs:
@@ -193,6 +197,8 @@ def load_fit_inputs(a, warn=None):
 		z = (z - f.means) / f.sds
 	f.z = z
 	f.truth, f.truth_chrom = simulated_truth(d, f.cols, a.chrom_effects, a.standardize)
+	if f.truth is not None and not a.parent_effects:
+		f.truth.pop("log_s_p", None); f.truth.pop("log_s_nu", None)
 	return f
 
 
@@ -209,6 +215,7 @@ def simulated_truth(d, cols, chrom_effects, standardized):
 	simulated_chrom = bool(d.get("chrom_effects", True))
 	if not simulated_chrom:                        # no chromosome effects were simulated
 		t.pop("log_t_p"); t.pop("log_t_nu")
+	t = {k: v for k, v in t.items() if np.all(np.isfinite(v))}     # e.g. log of an SD simulated as 0
 	truth_chrom = None
 	if chrom_effects and "c_p" in d:
 		truth_chrom = {"c_p": np.asarray(d["c_p"]), "c_nu": np.asarray(d["c_nu"])}
@@ -239,7 +246,7 @@ def parent_lengths_of(d):
 	return None
 
 
-def data_summary(f, chrom_effects, standardize):
+def data_summary(f, chrom_effects, standardize, parent_effects=True):
 	"""The lines written to stderr before a fit."""
 	d, K = f.d, len(f.names)
 	return (f"individuals with data:            {f.P:,}\n"
@@ -249,6 +256,7 @@ def data_summary(f, chrom_effects, standardize):
 	        f"one coefficient each for logit p and log(nu - 1))\n"
 	        f"chromosome-specific effects:      {'included' if chrom_effects else 'not included'}"
 	        f" ({len(d['chrom_len'])} chromosomes)\n"
+	        f"individual-specific effects:      {'included' if parent_effects else 'not included'}\n"
 	        f"covariates:                       "
 	        f"{'simulated values from the data file' if f.source == 'simulated' else 'from ' + f.source}; "
 	        f"{'standardized here' if standardize else 'used as given'}")

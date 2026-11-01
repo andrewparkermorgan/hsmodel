@@ -96,3 +96,52 @@ def test_global_entries_name_coefficients():
 	entries = M.global_entries(M.globals_used(False), 2, ["age", "sex"])
 	keys = [e[0] for e in entries]
 	assert "b_p[age]" in keys and "b_nu[sex]" in keys and not any(k.startswith("log_t") for k in keys)
+
+
+# ---------------------------------------------------------------------------
+# Without individual-specific (parent) effects
+# ---------------------------------------------------------------------------
+def test_globals_used():
+	assert M.globals_used() == M.GLOBALS
+	assert M.globals_used(parent_effects=False) == ["a_p", "b_p", "log_t_p", "a_nu", "b_nu", "log_t_nu"]
+	assert M.globals_used(False, False) == ["a_p", "b_p", "a_nu", "b_nu"]
+
+
+def test_models_without_parent_effects(sim60):
+	"""No e_p, e_nu, log_s_* sites anywhere; with the parent effects fixed at
+	0 the full model's likelihood term equals the reduced model's."""
+	d = sim60
+	P = d["P"]
+	bt = ParentBatcher(d["X"], d["NXO"], d["chrom"], d["par"], P, d["chrom_len"], batch=16)
+	ix, data = next(bt.stream())
+	Lc, z = bt.Lc, jnp.asarray(d["z"])
+	sites = draw_sites(M.model, data, Lc, ix, z, P, False, False, seed=1)
+	assert set(sites) == {"a_p", "b_p", "a_nu", "b_nu"}
+	reduced = logdens(lambda *a: M.model(*a, chrom_effects=False, parent_effects=False), (data, Lc, ix, z, P), sites)
+	full_sites = dict(sites, log_s_p=jnp.array(0.0), log_s_nu=jnp.array(0.0), e_p=jnp.zeros(16), e_nu=jnp.zeros(16))
+	full = logdens(lambda *a: M.model(*a, chrom_effects=False), (data, Lc, ix, z, P), full_sites)
+	prior_extra = float(sum(dist_logp for dist_logp in (
+		jax.scipy.stats.norm.logpdf(0.0, *M.PRIORS["log_s_p"]), jax.scipy.stats.norm.logpdf(0.0, *M.PRIORS["log_s_nu"]),
+		(P / 16) * 32 * jax.scipy.stats.norm.logpdf(0.0))))
+	assert np.isfinite(reduced) and abs(full - reduced - prior_extra) < 1e-6
+	# guides emit exactly the model's sites
+	for g in (M.guide, M.guide_lowrank):
+		tr = handlers.trace(handlers.seed(lambda *a: g(*a, chrom_effects=True, parent_effects=False), 0)).get_trace(
+			data, Lc, ix, z, P)
+		model_sites = {k for k, v in tr.items() if v["type"] == "sample" and not v["infer"].get("is_auxiliary")}
+		assert model_sites == {"a_p", "b_p", "log_t_p", "a_nu", "b_nu", "log_t_nu", "c_p", "c_nu"}
+	cd = jax.tree_util.tree_map(jnp.asarray, group_by_count(d["X"], d["NXO"], d["chrom"], 22, d["par"], P))
+	ns = draw_sites(nuts.model, cd, Lc, z, True, False, False, seed=2)
+	assert "e_p" not in ns and "log_s_p" not in ns and "c_p_decentered" in ns
+	assert np.isfinite(logdens(lambda *a: nuts.model(*a, parent_effects=False), (cd, Lc, z), ns))
+
+
+def test_lowrank_marginals_without_parent_effects():
+	rng = np.random.default_rng(1)
+	K, C, r = 2, 5, 3
+	G = 4 + 2 * K                                           # globals without log_s_p, log_s_nu
+	D = G + 2 * C
+	params = {"glob_loc": rng.standard_normal(D), "glob_cov_factor": 0.3 * rng.standard_normal((D, r)),
+	          "glob_cov_diag": rng.uniform(0.01, 0.2, D)}
+	m = M.lowrank_marginals(params, K=K, parent_effects=False)
+	assert "e_p_loc" not in m and "log_s_p_loc" not in m and m["b_p_loc"].shape == (K,) and m["c_nu_loc"].shape == (C,)

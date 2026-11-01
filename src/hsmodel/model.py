@@ -10,7 +10,8 @@ z [P, K] holds K parent-level covariates, assumed standardized (mean 0, SD 1;
 check_standardized warns otherwise); a 1-D z is one covariate.  b_p and b_nu
 are K-vectors, each coefficient with its own N(0, 1) prior.
 The parent and chromosome effects are crossed and additive on the link scale.
-chrom_effects=False drops the c terms (the parent-only model).
+chrom_effects=False drops the c terms (the parent-only model);
+parent_effects=False drops the parent terms s * e_i (and with them s_p, s_nu).
 
 Every meiotic product (one chromosome in one individual; one record) has the
 exact marginal likelihood from hsmodel.likelihood.record_loglik (pathway labels
@@ -64,9 +65,11 @@ LABELS = {
 COEFS = ("b_p", "b_nu")          # covariate coefficients: one per column of z
 
 
-def globals_used(chrom_effects=True):
-	"""The global parameters of the model with or without chromosome effects."""
-	return GLOBALS if chrom_effects else [g for g in GLOBALS if not g.startswith("log_t")]
+def globals_used(chrom_effects=True, parent_effects=True):
+	"""The global parameters of the model with or without chromosome effects
+	(log_t_p, log_t_nu) and parent effects (log_s_p, log_s_nu)."""
+	return [g for g in GLOBALS if (chrom_effects or not g.startswith("log_t"))
+	        and (parent_effects or not g.startswith("log_s"))]
 
 
 def as_covariate_matrix(z):
@@ -120,10 +123,10 @@ def expand_truth(truth_sampled, K, covariate_names=None):
 	        global_entries([n for n in GLOBALS if n in truth_sampled], K, covariate_names)}
 
 
-def sample_globals(chrom_effects, K):
+def sample_globals(chrom_effects, K, parent_effects=True):
 	"""Sample the global sites; b_p and b_nu are K-vectors with independent priors."""
 	g = {}
-	for n in globals_used(chrom_effects):
+	for n in globals_used(chrom_effects, parent_effects):
 		if n in COEFS:
 			with numpyro.plate("covariates", K):
 				g[n] = numpyro.sample(n, dist.Normal(*PRIORS[n]))
@@ -135,11 +138,12 @@ def sample_globals(chrom_effects, K):
 # ---------------------------------------------------------------------------
 # Model and guides
 # ---------------------------------------------------------------------------
-def model(data, Lc, ix, z, n_parents, chrom_effects=True):
+def model(data, Lc, ix, z, n_parents, chrom_effects=True, parent_effects=True):
 	"""data: one ParentBatcher batch; Lc [C] chromosome lengths; ix [B] global
-	parent indices; z [P, K] covariates (1-D: one covariate)."""
+	parent indices; z [P, K] covariates (1-D: one covariate).  Without parent
+	effects the likelihood is still scaled by P / B per minibatch."""
 	z = z[:, None] if z.ndim == 1 else z
-	g = sample_globals(chrom_effects, z.shape[1])
+	g = sample_globals(chrom_effects, z.shape[1], parent_effects)
 	if chrom_effects:
 		with numpyro.plate("chromosomes", Lc.shape[0]):
 			c_p = numpyro.sample("c_p", dist.Normal(0.0, jnp.exp(g["log_t_p"])))
@@ -147,10 +151,13 @@ def model(data, Lc, ix, z, n_parents, chrom_effects=True):
 	B = ix.shape[0]
 	zb = z[ix]                                                                  # [B, K]
 	with numpyro.handlers.scale(scale=n_parents / B), numpyro.plate("parents", B):
-		e_p = numpyro.sample("e_p", dist.Normal(0.0, 1.0))
-		e_nu = numpyro.sample("e_nu", dist.Normal(0.0, 1.0))
-		lp = g["a_p"] + zb @ g["b_p"] + jnp.exp(g["log_s_p"]) * e_p              # [B]
-		ln = g["a_nu"] + zb @ g["b_nu"] + jnp.exp(g["log_s_nu"]) * e_nu          # [B]
+		lp = g["a_p"] + zb @ g["b_p"]                                           # [B]
+		ln = g["a_nu"] + zb @ g["b_nu"]
+		if parent_effects:
+			e_p = numpyro.sample("e_p", dist.Normal(0.0, 1.0))
+			e_nu = numpyro.sample("e_nu", dist.Normal(0.0, 1.0))
+			lp = lp + jnp.exp(g["log_s_p"]) * e_p
+			ln = ln + jnp.exp(g["log_s_nu"]) * e_nu
 		if chrom_effects:                                                       # [B, C]
 			p = jax.nn.sigmoid(lp[:, None] + c_p[None, :])
 			nu = 1.0 + jnp.exp(ln[:, None] + c_nu[None, :])
@@ -159,9 +166,9 @@ def model(data, Lc, ix, z, n_parents, chrom_effects=True):
 		numpyro.factor("obs", count_loglik_per_parent(data, Lc, nu, p))
 
 
-def guide(data, Lc, ix, z, n_parents, chrom_effects=True):
+def guide(data, Lc, ix, z, n_parents, chrom_effects=True, parent_effects=True):
 	K = 1 if z.ndim == 1 else z.shape[1]
-	for name in globals_used(chrom_effects):
+	for name in globals_used(chrom_effects, parent_effects):
 		if name in COEFS:
 			loc = numpyro.param(f"{name}_loc", jnp.full(K, PRIORS[name][0]))
 			scale = numpyro.param(f"{name}_scale", jnp.full(K, 0.1), constraint=dist.constraints.positive)
@@ -179,6 +186,8 @@ def guide(data, Lc, ix, z, n_parents, chrom_effects=True):
 		with numpyro.plate("chromosomes", C):
 			for n in CHROM_SITES:
 				numpyro.sample(n, dist.Normal(locs[n], scales[n]))
+	if not parent_effects:
+		return
 	ep_loc = numpyro.param("e_p_loc", jnp.zeros(n_parents))
 	ep_sc = numpyro.param("e_p_scale", jnp.ones(n_parents), constraint=dist.constraints.positive)
 	en_loc = numpyro.param("e_nu_loc", jnp.zeros(n_parents))
@@ -189,17 +198,17 @@ def guide(data, Lc, ix, z, n_parents, chrom_effects=True):
 		numpyro.sample("e_nu", dist.Normal(en_loc[ix], en_sc[ix]))
 
 
-def _global_layout(chrom_effects, K):
+def _global_layout(chrom_effects, K, parent_effects=True):
 	"""[(site, slice into the global latent vector)] for guide_lowrank, and its length G."""
 	out, start = [], 0
-	for n in globals_used(chrom_effects):
+	for n in globals_used(chrom_effects, parent_effects):
 		size = K if n in COEFS else 1
 		out.append((n, slice(start, start + size)))
 		start += size
 	return out, start
 
 
-def guide_lowrank(data, Lc, ix, z, n_parents, chrom_effects=True, rank=4):
+def guide_lowrank(data, Lc, ix, z, n_parents, chrom_effects=True, rank=4, parent_effects=True):
 	"""Structured guide that relaxes mean-field, compatible with minibatches of parents.
 
 	Global block: theta = (globals incl. the K-vectors b_p, b_nu; c_p; c_nu),
@@ -214,11 +223,12 @@ def guide_lowrank(data, Lc, ix, z, n_parents, chrom_effects=True, rank=4):
 	parent block is scaled by P / B exactly as in the mean-field guide.  A full
 	low-rank covariance across *all* parents would share factors between
 	parents, and its density could not be evaluated one minibatch at a time.
+	Without parent effects there is no parent block.
 
 	The latent vectors are auxiliary sites; the model's sites are emitted as
 	Deltas at their values (the same device numpyro's autoguides use)."""
 	K = 1 if z.ndim == 1 else z.shape[1]
-	layout, G = _global_layout(chrom_effects, K)
+	layout, G = _global_layout(chrom_effects, K, parent_effects)
 	C = Lc.shape[0] if chrom_effects else 0
 	D = G + 2 * C
 	mu0 = jnp.concatenate([jnp.full(sl.stop - sl.start, PRIORS[n][0]) for n, sl in layout] + [jnp.zeros(2 * C)])
@@ -237,6 +247,8 @@ def guide_lowrank(data, Lc, ix, z, n_parents, chrom_effects=True, rank=4):
 		with numpyro.plate("chromosomes", C):
 			numpyro.sample("c_p", dist.Delta(theta[G:G + C]))
 			numpyro.sample("c_nu", dist.Delta(theta[G + C:]))
+	if not parent_effects:
+		return
 	m = numpyro.param("local_loc", jnp.zeros((n_parents, 2)))
 	L = numpyro.param("local_scale_tril", jnp.tile(jnp.eye(2), (n_parents, 1, 1)),
 	                  constraint=dist.constraints.lower_cholesky)
@@ -251,13 +263,13 @@ def guide_lowrank(data, Lc, ix, z, n_parents, chrom_effects=True, rank=4):
 		numpyro.sample("e_nu", dist.Delta(e[:, 1]))
 
 
-def lowrank_marginals(params, chrom_effects=True, K=1):
+def lowrank_marginals(params, chrom_effects=True, K=1, parent_effects=True):
 	"""Marginal mean and SD of every site under guide_lowrank, in the mean-field
 	naming ({site}_loc, {site}_scale; K-vectors for b_p and b_nu), so summarize,
 	chrom_summary and the plots work unchanged.  Also
 	returns the global block's correlation matrix as "glob_corr" (order:
 	globals as in GLOBALS with b_p, b_nu expanded, then c_p, c_nu)."""
-	layout, G = _global_layout(chrom_effects, K)
+	layout, G = _global_layout(chrom_effects, K, parent_effects)
 	mu = np.asarray(params["glob_loc"])
 	W = np.asarray(params["glob_cov_factor"])
 	Sig = np.diag(np.asarray(params["glob_cov_diag"])) + W @ W.T
@@ -273,6 +285,8 @@ def lowrank_marginals(params, chrom_effects=True, K=1):
 		for j, n in enumerate(["c_p", "c_nu"]):
 			sl = slice(G + j * C, G + (j + 1) * C)
 			out[f"{n}_loc"], out[f"{n}_scale"] = mu[sl], sd[sl]
+	if not parent_effects:
+		return out
 	# parents: Cov(e_i) = L_i L_i^T + B_i Sig_gg B_i^T
 	L = np.asarray(params["local_scale_tril"])
 	Bc = np.asarray(params["local_coupling"])

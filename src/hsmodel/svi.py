@@ -22,7 +22,7 @@ from .model import (GLOBALS, CHROM_SITES, as_covariate_matrix, check_standardize
 
 
 def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500, chrom_effects=True,
-        guide_type="meanfield", rank=4, covariate_names=None, log=None):
+        guide_type="meanfield", rank=4, covariate_names=None, log=None, parent_effects=True):
 	"""batcher: ParentBatcher; z [P, K] standardized parent covariates (1-D: one).
 	guide_type: "meanfield" (guide) or "lowrank" (guide_lowrank, with `rank`).
 	For "lowrank" the returned params also hold the marginal {site}_loc and
@@ -32,7 +32,9 @@ def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500,
 	is in a batch, i.e. about steps * B / P times.  With ~50 updates per parent
 	the between-parent SDs (log_s_p, log_s_nu) collapse towards zero; with ~400
 	they were recovered (200-parent test).  Choose steps ~ 400 * P / B, e.g.
-	~19,000 steps for the 1500-parent demo with B = 32.
+	~19,000 steps for the 1500-parent demo with B = 32.  Without parent effects
+	(parent_effects=False) there are no per-parent parameters, so far fewer
+	steps suffice.
 
 	Progress (every log_every steps; 0 for none) is written to `log`
 	(default sys.stdout)."""
@@ -42,14 +44,14 @@ def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500,
 	z = jnp.asarray(z)
 	P, Lc = batcher.P, batcher.Lc
 	if guide_type == "lowrank":
-		guide_fn = partial(guide_lowrank, chrom_effects=chrom_effects, rank=rank)
+		guide_fn = partial(guide_lowrank, chrom_effects=chrom_effects, rank=rank, parent_effects=parent_effects)
 	elif guide_type == "meanfield":
-		guide_fn = partial(guide, chrom_effects=chrom_effects)
+		guide_fn = partial(guide, chrom_effects=chrom_effects, parent_effects=parent_effects)
 	else:
 		raise ValueError(f"unknown guide_type {guide_type!r}")
 	opt = optax.chain(optax.clip_by_global_norm(10.0),
 	                  optax.adam(optax.cosine_decay_schedule(lr, steps, alpha=0.05)))
-	svi = SVI(partial(model, chrom_effects=chrom_effects), guide_fn, opt,
+	svi = SVI(partial(model, chrom_effects=chrom_effects, parent_effects=parent_effects), guide_fn, opt,
 	          loss=Trace_ELBO(num_particles=num_particles))
 	batches = batcher.stream()
 	ix, data = next(batches)
@@ -80,7 +82,7 @@ def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500,
 			      f"  [{time.time()-t0:.0f}s]", file=log or sys.stdout, flush=True)
 	params = {k: np.asarray(v) for k, v in svi.get_params(state).items()}
 	if guide_type == "lowrank":
-		params.update(lowrank_marginals(params, chrom_effects, K))
+		params.update(lowrank_marginals(params, chrom_effects, K, parent_effects))
 	return params, np.array(losses)
 
 

@@ -41,6 +41,14 @@ def add_arguments(ap):
 	ap.add_argument("--rank", type=int, default=4, help="rank of the low-rank guide's covariance (default 4)")
 	ap.add_argument("--seed", type=int, default=0)
 	ap.add_argument("--batch", type=int, default=32, help="individuals per minibatch (default 32)")
+	ap.add_argument("--exact", action="store_true",
+	                help="evaluate F* and G* in the likelihood in closed form (regularized incomplete gamma "
+	                     "function) instead of by Gauss-Legendre quadrature.  Gradients in nu are several times "
+	                     "slower.  The closed forms drop the ~2^-K tail of the sum in f* that quadrature keeps, "
+	                     "so consider a larger --truncate-at (e.g. 60)")
+	ap.add_argument("--truncate-at", type=int, default=None, metavar="K",
+	                help="number of terms kept in the infinite sum f*(d) = sum_k 2^-k Gamma(d; k nu, 2 nu (1-p)) "
+	                     "(default 20; omitted terms have total weight 2^-K)")
 	ap.add_argument("--out", default="svi_fit", help="prefix for output files (default svi_fit)")
 
 
@@ -53,6 +61,8 @@ def run(a):
 		raise CommandError("--rank must be at least 1")
 	if a.batch < 1:
 		raise CommandError("--batch must be at least 1")
+	if a.truncate_at is not None and a.truncate_at < 1:
+		raise CommandError("--truncate-at must be at least 1")
 	try:
 		f = load_fit_inputs(a)
 	except (InputError, OSError, KeyError) as e:
@@ -70,6 +80,10 @@ def run(a):
 
 	# JAX-based modules are imported only once the inputs have been checked
 	import warnings
+	from . import likelihood
+	K_terms = a.truncate_at if a.truncate_at is not None else likelihood.K_TERMS
+	print(f"likelihood: F* and G* {'in closed form (incomplete gamma)' if a.exact else f'by quadrature ({likelihood.N_QUAD} Gauss-Legendre nodes)'}; "
+	      f"sum in f* truncated at K = {K_terms} terms", file=sys.stderr, flush=True)
 	from .batching import ParentBatcher
 	from .model import expand_truth
 	from .plots import plot_summary
@@ -82,12 +96,13 @@ def run(a):
 		warnings.showwarning = lambda msg, *args, **kw: print(f"warning: {msg}", file=sys.stderr)
 		params, losses = fit(bt, f.z, steps=steps, lr=a.lr, seed=a.seed, log_every=max(1, steps // 10),
 		                     chrom_effects=a.chrom_effects, guide_type=a.guide_type, rank=a.rank,
-		                     covariate_names=names, log=sys.stderr, parent_effects=a.parent_effects)
+		                     covariate_names=names, log=sys.stderr, parent_effects=a.parent_effects,
+		                     K_terms=K_terms, exact=a.exact)
 
 	# ---- results ---------------------------------------------------------------
 	truth_x = expand_truth(f.truth, len(names), names)
 	print(f"# Housworth-Stahl SVI fit: {P} individuals, {n_prod} meiotic products, {n_xo} crossovers; "
-	      f"guide {a.guide_type}; {steps} steps")
+	      f"guide {a.guide_type}; {steps} steps; likelihood {'exact' if a.exact else 'quadrature'}, K = {K_terms}")
 	if a.standardize:
 		print("# covariates standardized: " + "; ".join(f"{n} mean {m:.4g} SD {sd:.4g}"
 		                                                  for n, m, sd in zip(names, f.means, f.sds)))
@@ -97,7 +112,7 @@ def run(a):
 		print("\n" + chrom_table(cs, d["chrom_names"], f.truth_chrom))
 	np.savez(f"{a.out}_params.npz", **params, individual_ids=np.array(f.iids), covariate_names=np.array(names),
 	         chrom_names=np.asarray(d["chrom_names"]), covariate_means=f.means, covariate_sds=f.sds,
-	         standardized=a.standardize, losses=losses)
+	         standardized=a.standardize, losses=losses, likelihood_exact=a.exact, likelihood_K=K_terms)
 	plot = plot_summary(params, losses, f"{a.out}_summary.png", truth=f.truth, truth_chrom=f.truth_chrom,
 	                    covariate_names=names, chrom_names=list(d["chrom_names"]),
 	                    title=f"Housworth-Stahl SVI fit ({a.guide_type} guide): {P} individuals, "

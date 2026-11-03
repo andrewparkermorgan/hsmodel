@@ -138,10 +138,12 @@ def sample_globals(chrom_effects, K, parent_effects=True):
 # ---------------------------------------------------------------------------
 # Model and guides
 # ---------------------------------------------------------------------------
-def model(data, Lc, ix, z, n_parents, chrom_effects=True, parent_effects=True):
+def model(data, Lc, ix, z, n_parents, chrom_effects=True, parent_effects=True, K_terms=None, exact=False):
 	"""data: one ParentBatcher batch; Lc [C] chromosome lengths; ix [B] global
 	parent indices; z [P, K] covariates (1-D: one covariate).  Without parent
-	effects the likelihood is still scaled by P / B per minibatch."""
+	effects the likelihood is still scaled by P / B per minibatch.
+	K_terms: terms kept in the sum over k in f* (None: likelihood.K_TERMS);
+	exact: closed-form (incomplete gamma) F* and G* instead of quadrature."""
 	z = z[:, None] if z.ndim == 1 else z
 	g = sample_globals(chrom_effects, z.shape[1], parent_effects)
 	if chrom_effects:
@@ -163,7 +165,7 @@ def model(data, Lc, ix, z, n_parents, chrom_effects=True, parent_effects=True):
 			nu = 1.0 + jnp.exp(ln[:, None] + c_nu[None, :])
 		else:
 			p, nu = jax.nn.sigmoid(lp), 1.0 + jnp.exp(ln)
-		numpyro.factor("obs", count_loglik_per_parent(data, Lc, nu, p))
+		numpyro.factor("obs", count_loglik_per_parent(data, Lc, nu, p, K_terms, exact))
 
 
 def guide(data, Lc, ix, z, n_parents, chrom_effects=True, parent_effects=True):

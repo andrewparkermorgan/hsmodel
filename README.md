@@ -28,7 +28,7 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
                         [--steps N] [--guide-type meanfield|lowrank] [--lr 0.02] [--rank 4]
                         [--seed 0] [--chrom-effects | --no-chrom-effects]
                         [--parent-effects | --no-parent-effects] [--batch 32]
-                        [--standardize] [--out PREFIX]
+                        [--exact] [--truncate-at K] [--standardize] [--out PREFIX]
     hsmodel nuts        --data data.npz [--covariates covariates.txt] [--coefficients ...]
                         [--parents K] [--chains 4] [--warmup 1000] [--samples 1000]
                         [--target-accept 0.9] [--max-tree-depth 8] [--svi-init [--svi-steps N]]
@@ -63,6 +63,15 @@ coefficients' scale.
 SDs `t_p, t_nu`). `--no-parent-effects` drops the individual-specific effects
 `s_p e_p_i, s_nu e_nu_i`, so individuals then differ only through their
 covariates.
+
+By default the likelihood computes F* and G* by 64-node Gauss-Legendre
+quadrature and keeps K = 20 terms of the sum in f*. `infer --exact` uses the
+closed forms (incomplete gamma function) instead: about 6x slower, but correct
+for very strong interference. Quadrature is accurate to ~1e-10 per meiotic
+product up to nu ~ 64 on a 2.8 M chromosome, but its error grows to ~2e-4 at
+nu = 150 and ~0.1 at nu = 300. `--truncate-at K` sets the number of terms; the
+closed forms drop the omitted ~2^-K tail, so use K of about 60 with `--exact`.
+(`nuts` has the corresponding `--k-terms` and `--quad-nodes`.)
 
 `hsmodel COMMAND --help` lists every option.
 

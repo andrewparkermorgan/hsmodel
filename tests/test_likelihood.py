@@ -150,3 +150,19 @@ def test_escape_posterior_calibration(nu, p):
 			q = pe[sel].mean()
 			se = np.sqrt(q * (1 - q) / sel.sum())
 			assert abs(lab[sel].mean() - q) < 4 * se + 0.005, (lo, hi, q, lab[sel].mean())
+
+
+@pytest.mark.parametrize("nu, L, ok", [(64.0, 2.8, True), (300.0, 2.8, False)])
+def test_quadrature_breaks_down_at_extreme_nu(nu, L, ok):
+	"""Quadrature matches the closed form (K = 80) up to nu ~ 64 on a 2.8 M
+	chromosome, but not for much stronger interference: the reason for
+	`hsmodel infer --exact`."""
+	from functools import partial
+	from hsmodel.data import pad_records
+	rng = np.random.default_rng(0)
+	recs = [simulate_product(nu, 0.05, L, rng) for _ in range(100)]
+	X, N, LEN = pad_records(recs, [L] * 100, max_n=8)
+	fq = jax.jit(jax.vmap(record_loglik, in_axes=(0, 0, 0, None, None)))
+	fe = jax.jit(jax.vmap(partial(record_loglik, K=80, exact=True), in_axes=(0, 0, 0, None, None)))
+	err = np.max(np.abs(np.asarray(fq(X, N, LEN, nu, 0.05)) - np.asarray(fe(X, N, LEN, nu, 0.05))))
+	assert (err < 1e-9) if ok else (err > 1e-3)

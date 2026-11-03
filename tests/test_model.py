@@ -145,3 +145,29 @@ def test_lowrank_marginals_without_parent_effects():
 	          "glob_cov_diag": rng.uniform(0.01, 0.2, D)}
 	m = M.lowrank_marginals(params, K=K, parent_effects=False)
 	assert "e_p_loc" not in m and "log_s_p_loc" not in m and m["b_p_loc"].shape == (K,) and m["c_nu_loc"].shape == (C,)
+
+
+# ---------------------------------------------------------------------------
+# Likelihood settings: closed form and truncation
+# ---------------------------------------------------------------------------
+def test_model_likelihood_settings(sim60):
+	"""K_terms and exact reach the likelihood: the closed form with many terms
+	agrees with quadrature, and truncating the sum in f* changes the value."""
+	d = sim60
+	P = d["P"]
+	bt = ParentBatcher(d["X"], d["NXO"], d["chrom"], d["par"], P, d["chrom_len"], batch=8)
+	ix, data = next(bt.stream())
+	Lc, z = bt.Lc, jnp.asarray(d["z"])
+	sites = draw_sites(M.model, data, Lc, ix, z, P, seed=4)
+	# realistic values (nu ~ 10): prior draws can reach nu in the hundreds,
+	# where quadrature is inaccurate (test_quadrature_breaks_down_at_extreme_nu)
+	sites.update(a_p=jnp.array(-2.75), a_nu=jnp.array(2.3), b_p=jnp.zeros(1), b_nu=jnp.zeros(1),
+	             log_s_p=jnp.array(-1.2), log_s_nu=jnp.array(-1.9), log_t_p=jnp.array(-1.2), log_t_nu=jnp.array(-1.6))
+
+	def lp(**kw):
+		return logdens(lambda *a: M.model(*a, **kw), (data, Lc, ix, z, P), sites)
+
+	quad = lp()
+	assert abs(lp(K_terms=60, exact=True) - quad) < 1e-6 * abs(quad)
+	assert lp(K_terms=20) == quad                                   # 20 is the default
+	assert abs(lp(K_terms=2) - quad) > 1e-3                         # coarse truncation is visible

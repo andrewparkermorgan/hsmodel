@@ -22,7 +22,8 @@ from .model import (GLOBALS, CHROM_SITES, as_covariate_matrix, check_standardize
 
 
 def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500, chrom_effects=True,
-        guide_type="meanfield", rank=4, covariate_names=None, log=None, parent_effects=True):
+        guide_type="meanfield", rank=4, covariate_names=None, log=None, parent_effects=True, K_terms=None,
+        exact=False):
 	"""batcher: ParentBatcher; z [P, K] standardized parent covariates (1-D: one).
 	guide_type: "meanfield" (guide) or "lowrank" (guide_lowrank, with `rank`).
 	For "lowrank" the returned params also hold the marginal {site}_loc and
@@ -35,6 +36,10 @@ def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500,
 	~19,000 steps for the 1500-parent demo with B = 32.  Without parent effects
 	(parent_effects=False) there are no per-parent parameters, so far fewer
 	steps suffice.
+
+	Likelihood: K_terms terms of the sum over k in f* (None: likelihood.K_TERMS,
+	i.e. 20); exact=True evaluates F* and G* in closed form with the
+	incomplete gamma function instead of by quadrature (slower gradients in nu).
 
 	Progress (every log_every steps; 0 for none) is written to `log`
 	(default sys.stdout)."""
@@ -51,7 +56,8 @@ def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500,
 		raise ValueError(f"unknown guide_type {guide_type!r}")
 	opt = optax.chain(optax.clip_by_global_norm(10.0),
 	                  optax.adam(optax.cosine_decay_schedule(lr, steps, alpha=0.05)))
-	svi = SVI(partial(model, chrom_effects=chrom_effects, parent_effects=parent_effects), guide_fn, opt,
+	svi = SVI(partial(model, chrom_effects=chrom_effects, parent_effects=parent_effects, K_terms=K_terms,
+	                  exact=exact), guide_fn, opt,
 	          loss=Trace_ELBO(num_particles=num_particles))
 	batches = batcher.stream()
 	ix, data = next(batches)

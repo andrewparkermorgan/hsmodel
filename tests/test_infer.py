@@ -91,6 +91,7 @@ def test_input_errors(setup, case):
 	(["--lr", "0"], "--lr must be positive"),
 	(["--rank", "0"], "--rank must be at least 1"),
 	(["--guide-type", "full"], "invalid choice"),
+	(["--truncate-at", "0"], "--truncate-at must be at least 1"),
 ])
 def test_argument_errors(setup, args, message):
 	r = run_infer(setup, ["--covariates", setup["cov"]] + args)
@@ -234,3 +235,27 @@ def test_no_parent_effects_lowrank(setup):
 	p = np.load(setup["tmp"] / "f3_params.npz")
 	assert "local_loc" not in p.files and "e_p_loc" not in p.files and "glob_loc" in p.files
 	assert "log_s_p" not in r.stdout and "log_t_p" in r.stdout
+
+
+# ---------------------------------------------------------------------------
+# Likelihood settings
+# ---------------------------------------------------------------------------
+def test_truncation_option(setup):
+	r = run_infer(setup, ["--covariates", setup["cov"], "--standardize", "--truncate-at", "12", "--steps", "10",
+	                      "--out", setup["tmp"] / "k12"])
+	assert r.returncode == 0, r.stderr[-2000:]
+	assert "by quadrature (64 Gauss-Legendre nodes); sum in f* truncated at K = 12 terms" in r.stderr
+	assert "likelihood quadrature, K = 12" in r.stdout
+	p = np.load(setup["tmp"] / "k12_params.npz")
+	assert int(p["likelihood_K"]) == 12 and not bool(p["likelihood_exact"])
+
+
+@pytest.mark.slow
+def test_exact_likelihood_option(setup):
+	"""The closed-form likelihood runs and gives finite losses (its gradients are slow)."""
+	r = run_infer(setup, ["--covariates", setup["cov"], "--standardize", "--exact", "--truncate-at", "40",
+	                      "--steps", "10", "--no-chrom-effects", "--out", setup["tmp"] / "ex"])
+	assert r.returncode == 0, r.stderr[-2000:]
+	assert "in closed form (incomplete gamma); sum in f* truncated at K = 40 terms" in r.stderr
+	p = np.load(setup["tmp"] / "ex_params.npz")
+	assert bool(p["likelihood_exact"]) and int(p["likelihood_K"]) == 40 and np.all(np.isfinite(p["losses"]))

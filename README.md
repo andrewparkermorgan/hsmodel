@@ -47,7 +47,9 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
 * **infer** fits the model to a `.npz` dataset plus a covariate file (first
   column `iid`, optional `#` header line). It writes the data summary and
   progress to stderr, a table of posterior summaries to stdout, and
-  `PREFIX_params.npz` and `PREFIX_summary.png`.
+  `PREFIX_params.npz` and `PREFIX_summary.png`. It ends by printing to stderr
+  the implied nu and p at the intercept, 1 + exp(a_nu) and
+  1 / (1 + exp(-a_p)): every covariate 0 and the random effects at their mean.
 * **nuts** fits the same model to the same inputs with NUTS, using the whole
   dataset at every step. It is much slower than SVI (`--parents K` fits only
   the first K individuals). It writes the posterior table (with effective
@@ -124,6 +126,8 @@ setting the device count that `--chain-method parallel` needs.
 `examples/` holds scripts that are not part of the command-line interface:
 * `svi_demo.py` and `nuts_demo.py`: SVI and NUTS fits to the default simulated dataset
 * `approx_accuracy.py` and `quadrature_accuracy.py`: studies of approximation error
+* `compare_cointf.py`: checks the likelihood against the independent `cointf` package
+  (https://github.com/aabiddanda/cointf); `tests/test_cointf.py` runs when it is installed
 * `plot_nu_p_correlation.py`
 * `kinship_model_sketch.py`: a sketch of a kinship-structured model
 * `example_chromosomes.txt`: an example `--chrom-lengths` file

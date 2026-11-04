@@ -185,6 +185,24 @@ def test_simulated_covariates_used_without_file(simulated):
 	assert chrom_head[-1] == "true_effect_on_log_nu_minus_1"
 	p = np.load(tmp / "s1_params.npz")
 	assert list(p["individual_ids"][:3]) == ["0", "1", "2"]
+	# implied nu at the intercept, at the end of stderr
+	tail = r.stderr.rsplit("implied nu at the intercept", 1)[1]
+	assert "all covariates = 0, chromosome and individual effects at their mean (0)" in tail
+	median = float(tail.split("posterior median ")[1].split(",")[0])
+	assert median == pytest.approx(1 + np.exp(float(p["a_nu_loc"])), rel=1e-3)
+	tail_p = r.stderr.rsplit("implied p at the intercept", 1)[1]
+	median_p = float(tail_p.split("posterior median ")[1].split(",")[0])
+	assert median_p == pytest.approx(1 / (1 + np.exp(-float(p["a_p_loc"]))), rel=1e-3)
+
+
+def test_intercept_nu():
+	from hsmodel.svi import intercept_nu
+	s = intercept_nu({"a_nu_loc": np.array(np.log(9.0)), "a_nu_scale": np.array(0.1)})
+	assert s["median"] == pytest.approx(10.0)
+	assert s["lower95"] < s["median"] < s["mean"] < s["upper95"]
+	draws = 1 + np.exp(np.random.default_rng(0).normal(np.log(9.0), 0.1, 400000))
+	assert s["mean"] == pytest.approx(draws.mean(), rel=1e-3)
+	assert s["upper95"] == pytest.approx(np.quantile(draws, 0.975), rel=2e-3)
 
 
 def test_simulated_covariates_override_file(simulated, setup):
@@ -259,3 +277,15 @@ def test_exact_likelihood_option(setup):
 	assert "in closed form (incomplete gamma); sum in f* truncated at K = 40 terms" in r.stderr
 	p = np.load(setup["tmp"] / "ex_params.npz")
 	assert bool(p["likelihood_exact"]) and int(p["likelihood_K"]) == 40 and np.all(np.isfinite(p["losses"]))
+
+
+def test_intercept_p():
+	from hsmodel.svi import intercept_p
+	m, sd = np.log(0.06 / 0.94), 0.4
+	s = intercept_p({"a_p_loc": np.array(m), "a_p_scale": np.array(sd)})
+	assert s["median"] == pytest.approx(0.06)
+	draws = 1 / (1 + np.exp(-np.random.default_rng(0).normal(m, sd, 400000)))
+	assert s["mean"] == pytest.approx(draws.mean(), rel=2e-3)
+	assert s["lower95"] == pytest.approx(np.quantile(draws, 0.025), rel=3e-3)
+	assert s["upper95"] == pytest.approx(np.quantile(draws, 0.975), rel=3e-3)
+	assert s["lower95"] < s["median"] < s["mean"] < s["upper95"]

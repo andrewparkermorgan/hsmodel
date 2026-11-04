@@ -87,7 +87,7 @@ def run(a):
 	from .batching import ParentBatcher
 	from .model import expand_truth
 	from .plots import plot_summary
-	from .svi import fit, summarize, chrom_summary
+	from .svi import fit, summarize, chrom_summary, intercept_nu, intercept_p
 
 	bt = ParentBatcher(d["X"], d["NXO"], d["chrom"], d["par"], P, d["chrom_len"], batch=batch,
 	                   seed=a.seed, parent_lengths=parent_lengths_of(d))
@@ -118,4 +118,16 @@ def run(a):
 	                    title=f"Housworth-Stahl SVI fit ({a.guide_type} guide): {P} individuals, "
 	                          f"{n_prod:,} meiotic products, {steps:,} steps")
 	print(f"\nwrote {a.out}_params.npz and {plot}", file=sys.stderr)
+	nu0 = intercept_nu(params)
+	at = ("covariates at their means (standardized)" if a.standardize else "all covariates = 0")
+	effects = [e for e, on in (("chromosome", a.chrom_effects), ("individual", a.parent_effects)) if on]
+	if effects:
+		at += f", {' and '.join(effects)} effects at their mean (0)"
+	print(f"\nimplied nu at the intercept (nu = 1 + exp(a_nu); {at}):\n"
+	      f"  posterior median {nu0['median']:.4g}, mean {nu0['mean']:.4g}, "
+	      f"95% interval [{nu0['lower95']:.4g}, {nu0['upper95']:.4g}]", file=sys.stderr)
+	p0 = intercept_p(params)
+	print(f"implied p at the intercept (p = 1 / (1 + exp(-a_p)); same conditions):\n"
+	      f"  posterior median {p0['median']:.4g}, mean {p0['mean']:.4g}, "
+	      f"95% interval [{p0['lower95']:.4g}, {p0['upper95']:.4g}]", file=sys.stderr)
 	return 0

@@ -1,7 +1,7 @@
 # hsmodel
 
 The Housworth-Stahl (2003) two-pathway model of crossover interference,
-extended with parent and chromosome random effects and parent-level
+extended with parent- and chromosome-level random effects and parent-level
 covariates:
 
     logit p_ic      = a_p  + z_i . b_p  + s_p  e_p_i  + c_p_c
@@ -129,7 +129,7 @@ setting the device count that `--chain-method parallel` needs.
 * `compare_cointf.py`: checks the likelihood against the independent `cointf` package
   (https://github.com/aabiddanda/cointf); `tests/test_cointf.py` runs when it is installed
 * `plot_nu_p_correlation.py`
-* `kinship_model_sketch.py`: a sketch of a kinship-structured model
+* `kinship_model_sketch.py`: a sketch of a model with covariance of parent-level effects structured by genetic relatedness (interesting but statistically tricky and computationally demanding)
 * `example_chromosomes.txt`: an example `--chrom-lengths` file
 
 ## Tests
@@ -141,3 +141,7 @@ The tests cover the likelihood (against simulation, closed forms and
 brute-force enumeration of labellings), the grouped likelihoods and their
 gradients, minibatching, sex-specific map lengths, the model and guides, and
 the five commands end to end.
+
+## Credits
+
+Developed by Andrew P Morgan with advice from Arjun Bidanna (http://aabiddanda.github.io/), in collaboration with Claude Code. The statistical model and numerical approximations therein are tested against simulations but your mileage may vary.

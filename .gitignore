@@ -3,4 +3,7 @@ __pycache__/
 *.suo
 *.user
 .vscode/
+.claude/
+CLAUDE.md
 *.egg
+*.egg-info/

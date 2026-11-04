@@ -34,10 +34,13 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, init_to_median, init_to_value
 from numpyro.infer.reparam import LocScaleReparam
-from numpyro.diagnostics import summary as mcmc_summary
 
 from .likelihood import count_loglik_per_parent
 from .model import GLOBALS, CHROM_SITES, globals_used, sample_globals, as_covariate_matrix
+from .summaries import global_summary, chrom_draw_summary
+
+# The summaries of draws live in hsmodel.summaries (no JAX) and are re-exported here.
+__all__ = ["model", "parent_draws", "svi_init_values", "run_nuts", "global_summary", "chrom_draw_summary"]
 
 
 # ---------------------------------------------------------------------------
@@ -128,19 +131,3 @@ def run_nuts(data, Lc, z, chains=4, warmup=1000, samples=1000, target_accept=0.9
 	mcmc.run(jax.random.PRNGKey(seed), data, Lc, jnp.asarray(z),
 	         extra_fields=("diverging", "num_steps", "accept_prob"))
 	return mcmc
-
-
-def global_summary(by_chain):
-	"""numpyro summary (mean, sd, quantiles, n_eff, r_hat) for the globals present.
-	by_chain: {name: [chains, draws, ...]}, e.g. mcmc.get_samples(group_by_chain=True)."""
-	return mcmc_summary({k: np.asarray(by_chain[k]) for k in GLOBALS if k in by_chain}, prob=0.95)
-
-
-def chrom_draw_summary(by_chain):
-	"""{c_p / c_nu: (mean [C], 2.5% [C], 97.5% [C])} from the NUTS draws."""
-	out = {}
-	for n in CHROM_SITES:
-		if n in by_chain:
-			d = np.asarray(by_chain[n]).reshape(-1, np.asarray(by_chain[n]).shape[-1])
-			out[n] = (d.mean(0), np.percentile(d, 2.5, 0), np.percentile(d, 97.5, 0))
-	return out

@@ -34,52 +34,19 @@ import numpyro
 import numpyro.distributions as dist
 
 from .likelihood import count_loglik_per_parent
+from .summaries import (GLOBALS, CHROM_SITES, PRIORS, LABELS, COEFS, globals_used, default_covariate_names,
+                        global_entries, entry_value, expand_truth)
 
-GLOBALS = ["a_p", "b_p", "log_s_p", "log_t_p", "a_nu", "b_nu", "log_s_nu", "log_t_nu"]
-CHROM_SITES = ["c_p", "c_nu"]
-# Normal(loc, scale) priors on the globals, on the scale they are sampled.
-# Used by the model, the guide's initialization and the plots, so the plots
-# always show the priors fitted.
-PRIORS = {
-	"a_p": (-3.0, 1.5),
-	"b_p": (0.0, 1.0),
-	"log_s_p": (-1.0, 1.0),
-	"log_t_p": (-1.5, 1.0),
-	"a_nu": (float(np.log(9.0)), 1.0),
-	"b_nu": (0.0, 1.0),
-	"log_s_nu": (-1.0, 1.0),
-	"log_t_nu": (-1.5, 1.0),
-}
-LABELS = {
-	"a_p": "logit escape fraction at z = 0",
-	"b_p": "effect of covariate {cov} on logit p",
-	"log_s_p": "log between-parent SD of logit p",
-	"log_t_p": "log between-chromosome SD of logit p",
-	"a_nu": "log(nu - 1) at z = 0",
-	"b_nu": "effect of covariate {cov} on log(nu - 1)",
-	"log_s_nu": "log between-parent SD of log(nu - 1)",
-	"log_t_nu": "log between-chromosome SD of log(nu - 1)",
-}
-
-
-COEFS = ("b_p", "b_nu")          # covariate coefficients: one per column of z
-
-
-def globals_used(chrom_effects=True, parent_effects=True):
-	"""The global parameters of the model with or without chromosome effects
-	(log_t_p, log_t_nu) and parent effects (log_s_p, log_s_nu)."""
-	return [g for g in GLOBALS if (chrom_effects or not g.startswith("log_t"))
-	        and (parent_effects or not g.startswith("log_s"))]
+# The names, priors and labels live in hsmodel.summaries (no JAX) and are re-exported here.
+__all__ = ["GLOBALS", "CHROM_SITES", "PRIORS", "LABELS", "COEFS", "globals_used", "default_covariate_names",
+           "global_entries", "entry_value", "expand_truth", "as_covariate_matrix", "check_standardized",
+           "sample_globals", "model", "guide", "guide_lowrank", "lowrank_marginals"]
 
 
 def as_covariate_matrix(z):
 	"""z as a [P, K] array (a 1-D z is one covariate)."""
 	z = np.asarray(z, dtype=float)
 	return z[:, None] if z.ndim == 1 else z
-
-
-def default_covariate_names(K):
-	return ["z"] if K == 1 else [f"z{k + 1}" for k in range(K)]
 
 
 def check_standardized(z, covariate_names=None, tol_mean=0.15, tol_sd=0.25):
@@ -93,34 +60,6 @@ def check_standardized(z, covariate_names=None, tol_mean=0.15, tol_sd=0.25):
 		warnings.warn("covariates do not look standardized: " + "; ".join(bad) +
 		              ". The N(0, 1) priors on the coefficients assume mean 0 and SD 1.", stacklevel=2)
 	return not bad
-
-
-def global_entries(names, K, covariate_names=None):
-	"""Scalar entries for display: [(key, site, k, label)], k = None for scalar
-	sites and the coefficient index for b_p / b_nu (key e.g. "b_p[age]")."""
-	cov = covariate_names or default_covariate_names(K)
-	out = []
-	for n in names:
-		if n in COEFS:
-			for k in range(K):
-				out.append((f"{n}[{cov[k]}]", n, k, LABELS[n].format(cov=cov[k])))
-		else:
-			out.append((n, n, None, LABELS[n]))
-	return out
-
-
-def entry_value(value, k):
-	"""float of a site's value (scalar or K-vector) for entry index k."""
-	v = np.asarray(value, dtype=float)
-	return float(v) if k is None or v.ndim == 0 else float(np.atleast_1d(v)[k])
-
-
-def expand_truth(truth_sampled, K, covariate_names=None):
-	"""{display key: value} from {site: scalar or K-vector} (e.g. TRUTH_SAMPLED)."""
-	if truth_sampled is None:
-		return None
-	return {key: entry_value(truth_sampled[site], k) for key, site, k, _ in
-	        global_entries([n for n in GLOBALS if n in truth_sampled], K, covariate_names)}
 
 
 def sample_globals(chrom_effects, K, parent_effects=True):

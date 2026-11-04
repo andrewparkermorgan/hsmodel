@@ -17,8 +17,11 @@ import jax.numpy as jnp
 from numpyro.infer import SVI, Trace_ELBO
 import optax
 
-from .model import (GLOBALS, CHROM_SITES, as_covariate_matrix, check_standardized, global_entries, entry_value,
-                    model, guide, guide_lowrank, lowrank_marginals)
+from .model import as_covariate_matrix, check_standardized, model, guide, guide_lowrank, lowrank_marginals
+from .summaries import summarize, chrom_summary, chrom_recovery, intercept_nu, intercept_p
+
+# The summaries of guide parameters live in hsmodel.summaries (no JAX) and are re-exported here.
+__all__ = ["fit", "summarize", "chrom_summary", "chrom_recovery", "intercept_nu", "intercept_p"]
 
 
 def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500, chrom_effects=True,
@@ -90,34 +93,3 @@ def fit(batcher, z, steps=3000, lr=0.01, seed=0, num_particles=1, log_every=500,
 	if guide_type == "lowrank":
 		params.update(lowrank_marginals(params, chrom_effects, K, parent_effects))
 	return params, np.array(losses)
-
-
-def summarize(params, covariate_names=None):
-	"""{display key: (mean, sd, 2.5%, 97.5%)} for the globals present in params,
-	one entry per coefficient for b_p and b_nu (keys like "b_p[age]")."""
-	names = [n for n in GLOBALS if f"{n}_loc" in params]
-	K = np.atleast_1d(params["b_p_loc"]).size if "b_p_loc" in params else 1
-	out = {}
-	for key, site, k, _ in global_entries(names, K, covariate_names):
-		m, s = entry_value(params[f"{site}_loc"], k), entry_value(params[f"{site}_scale"], k)
-		out[key] = (m, s, m - 1.96 * s, m + 1.96 * s)
-	return out
-
-
-def chrom_summary(params):
-	"""{c_p / c_nu: (mean [C], 2.5% [C], 97.5% [C])} from the guide, if fitted."""
-	out = {}
-	for n in CHROM_SITES:
-		if f"{n}_loc" in params:
-			m, s = np.asarray(params[f"{n}_loc"]), np.asarray(params[f"{n}_scale"])
-			out[n] = (m, m - 1.96 * s, m + 1.96 * s)
-	return out
-
-
-def chrom_recovery(est, truth):
-	"""Agreement between estimated and true chromosome effects:
-	(correlation, RMSE, coverage of the 95% intervals)."""
-	m, lo, hi = est
-	truth = np.asarray(truth)
-	return (float(np.corrcoef(m, truth)[0, 1]), float(np.sqrt(np.mean((m - truth) ** 2))),
-	        float(np.mean((lo <= truth) & (truth <= hi))))

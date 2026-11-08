@@ -176,6 +176,38 @@ def test_nuts_fit_problems(files):
 	assert "largest R-hat among the globals" in res.stdout and "(a_nu)" in res.stdout
 
 
+@pytest.mark.parametrize("name, keys", [
+	("svi_params", ["a_p", "b_p[age]", "b_p[parity]", "log_s_p", "log_t_p", "a_nu", "b_nu[age]", "b_nu[parity]",
+	                "log_s_nu", "log_t_nu"]),
+	("svi_plain_params", ["a_p", "b_p[age]", "b_p[parity]", "a_nu", "b_nu[age]", "b_nu[parity]"]),
+	("nuts_samples", ["a_p", "b_p[age]", "b_p[parity]", "log_s_p", "log_t_p", "a_nu", "b_nu[age]",
+	                  "b_nu[parity]", "log_s_nu", "log_t_nu"])])
+def test_out_global_table(files, tmp_path, name, keys):
+	"""--out writes the globals as TSV, without the description column."""
+	out = tmp_path / "globals.tsv"
+	res = run_cli(["inspect", files / f"{name}.npz", "--out", out])
+	assert res.returncode == 0, res.stderr
+	assert "Global parameters" in res.stdout                  # still shown on stdout
+	lines = out.read_text().splitlines()
+	nuts = name.startswith("nuts")
+	assert lines[0].split("\t") == ["parameter", "mean", "sd", "lower95", "upper95"] + (["n_eff", "r_hat"] if nuts else [])
+	rows = [ln.split("\t") for ln in lines[1:]]
+	assert [r[0] for r in rows] == keys
+	assert all(len(r) == (7 if nuts else 5) for r in rows)
+	v = {r[0]: [float(x) for x in r[1:]] for r in rows}
+	assert all(lo <= m <= hi for m, _, lo, hi, *_ in v.values())
+	if not nuts:
+		assert v["a_p"][:2] == pytest.approx([-2.8, 0.1])
+		assert v["b_p[parity]"][:2] == pytest.approx([-0.2, 0.12])
+
+
+def test_out_rejected_for_dataset(files, tmp_path):
+	res = run_cli(["inspect", files / "sim.npz", "--out", tmp_path / "x.tsv"])
+	assert res.returncode == 2
+	assert "--out applies only to a fit" in res.stderr
+	assert not (tmp_path / "x.tsv").exists()
+
+
 @pytest.mark.parametrize("name, message", [("missing.npz", "no such file"), ("text.npz", "not an .npz archive"),
                                            ("other.npz", "not a dataset or a model fit")])
 def test_errors(files, name, message):

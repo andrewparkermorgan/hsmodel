@@ -36,7 +36,7 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
                         [--chain-method auto|sequential|vectorized|parallel] [--seed 0]
                         [--chrom-effects | --no-chrom-effects] [--parent-effects | --no-parent-effects]
                         [--standardize] [--out PREFIX]
-    hsmodel inspect     FILE.npz
+    hsmodel inspect     FILE.npz [--out FILE]
 
 * **simulate** draws a dataset from the model, prints a summary (with
   stem-and-leaf plots of crossovers per meiotic product and of inter-crossover
@@ -66,8 +66,10 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
   likelihood approximation), convergence (the -ELBO over the last steps, or
   divergences, R-hat and effective sample sizes), the posterior of the global
   parameters on the fitted and the natural scale, the chromosome effects, and
-  the spread of the individual effects. Datasets and SVI fits are read
-  without importing JAX.
+  the spread of the individual effects. For a fit, `--out FILE` also writes
+  the table of global parameters on the fitted scale (posterior mean, SD and
+  95% interval, plus n_eff and R-hat for NUTS) to FILE, tab-separated with a
+  header line. Datasets and SVI fits are read without importing JAX.
 
 For simulated data (`hsmodel simulate`), `infer` and `nuts` take the
 covariate values from the data file, so no covariate file is needed. The

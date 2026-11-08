@@ -17,11 +17,14 @@ The kind of file is recognized from its contents:
 
 Posterior summaries are given on the scale the model is fitted on (logit p,
 log(nu - 1), log SDs) and, for the main quantities, on the natural scale
-(p, nu, SDs).  Everything is written to stdout.
+(p, nu, SDs).  Everything is written to stdout.  For a fit, --out FILE also
+writes the table of global parameters on the fitted scale (logit p,
+log(nu - 1), log SDs, coefficients): posterior mean, SD and 95% interval,
+and for NUTS also n_eff and R-hat, tab-separated with a header line.
 
 Example:
     hsmodel inspect simulated_data.npz
-    hsmodel inspect svi_fit_params.npz
+    hsmodel inspect svi_fit_params.npz --out svi_fit_globals.tsv
 """
 import os
 import sys
@@ -30,7 +33,7 @@ import zipfile
 import numpy as np
 
 from .data import load_dataset, summarize_dataset
-from .errors import InputError
+from .errors import CommandError, InputError
 from .summaries import (GLOBALS, default_covariate_names, global_entries, entry_value, summarize, chrom_summary,
                         chrom_draw_summary)
 
@@ -53,17 +56,50 @@ INTERCEPT_NOTE = ("At the intercept every covariate is 0 (its mean, if standardi
 def add_arguments(ap):
 	ap.add_argument("file", metavar="FILE.npz",
 	                help="a dataset (from simulate or preprocess) or a fit (from infer or nuts)")
+	ap.add_argument("--out", metavar="FILE",
+	                help="for a fit, also write the global parameters on the fitted scale (parameter, mean, sd, "
+	                     "lower95, upper95, and for NUTS n_eff and r_hat) to FILE, tab-separated with a "
+	                     "header line")
 
 
 def run(a):
 	try:
 		kind, f = open_npz(a.file)
-		text = {"dataset": describe_dataset, "svi": describe_svi, "nuts": describe_nuts}[kind](a.file, f)
+		if kind == "dataset" and a.out:
+			raise CommandError(f"--out applies only to a fit; {a.file} is a dataset")
+		if kind == "dataset":
+			text, table = describe_dataset(a.file, f), None
+		else:
+			text, table = {"svi": describe_svi, "nuts": describe_nuts}[kind](a.file, f)
 	except (InputError, OSError) as e:
 		print(f"error: {e}", file=sys.stderr)
 		return 1
 	print(text)
+	if a.out:
+		try:
+			write_table(a.out, table)
+		except OSError as e:
+			print(f"error: {e}", file=sys.stderr)
+			return 1
+		print(f"global parameters written to {a.out}", file=sys.stderr)
 	return 0
+
+
+def write_table(path, rows):
+	"""Rows of strings (the first is the header) as tab-separated lines."""
+	with open(path, "w") as fh:
+		fh.write("".join("\t".join(r) + "\n" for r in rows))
+
+
+def global_table(summ, names, K, extra_cols=()):
+	"""The globals on the fitted scale for --out: rows of strings, header first, no description;
+	summ: {key: (mean, sd, lo, hi, *extra)} with extra numeric."""
+	rows = [["parameter", "mean", "sd", "lower95", "upper95", *extra_cols]]
+	present = [n for n in GLOBALS if any(key == n or key.startswith(n + "[") for key in summ)]
+	for key, *_ in global_entries(present, K, names):
+		if key in summ:
+			rows.append([key] + [num(x, 6) for x in summ[key]])
+	return rows
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +350,8 @@ def describe_svi(path, f):
 	names, settings = fit_settings(f, sites, P, C, extra)
 	what = ("SVI fit from `hsmodel nuts --svi-init` (the starting point of the NUTS chains)" if from_nuts
 	        else "SVI fit from `hsmodel infer`")
-	out = [f"{path}: {what}", "", "Settings:", settings, "",
-	       global_rows(summarize(f, names), names, K), "",
+	summ = summarize(f, names)
+	out = [f"{path}: {what}", "", "Settings:", settings, "", global_rows(summ, names, K), "",
 	       natural_rows({s: normal_natural(f, s, tr) for s, _, _, tr in NATURAL if f"{s}_loc" in f})]
 	if lowrank and "glob_corr" in f:
 		out += ["", posterior_correlations(f["glob_corr"], [key for key, *_ in global_entries(sites, K, names)])]
@@ -326,7 +362,7 @@ def describe_svi(path, f):
 		out += ["", individual_lines((f["e_p_loc"], f["e_nu_loc"]), (f["e_p_scale"], f["e_nu_scale"]),
 		                             strings(f, "individual_ids"), ("logit p", "log(nu - 1)"))]
 	out += ["", "Intervals are mean +/- 1.96 SD of the variational posterior (approximate)."]
-	return "\n".join(out)
+	return "\n".join(out), global_table(summ, names, K)
 
 
 def normal_natural(f, site, transform, n_nodes=64):
@@ -388,10 +424,11 @@ def describe_nuts(path, f):
 	names, settings = fit_settings(f, sites, P, C, extra)
 
 	summ = global_summary({k: f[k] for k in sites})
-	rows, worst = {}, []
+	rows, raw, worst = {}, {}, []
 	for key, site, k, _ in global_entries(sites, K, names):
 		s = {q: entry_value(summ[site][q], k) for q in ("mean", "std", "2.5%", "97.5%", "n_eff", "r_hat")}
 		rows[key] = (s["mean"], s["std"], s["2.5%"], s["97.5%"], f"{s['n_eff']:.0f}", f"{s['r_hat']:.3f}")
+		raw[key] = (s["mean"], s["std"], s["2.5%"], s["97.5%"], s["n_eff"], s["r_hat"])
 		worst.append((s["r_hat"], s["n_eff"], key))
 	flat = lambda x: np.asarray(x, dtype=float).reshape(-1)
 	nat = {}
@@ -422,4 +459,4 @@ def describe_nuts(path, f):
 	out += ["", "Diagnostics:"] + ([f"  warning: {p}" for p in problems] if problems else
 	                                ["  no divergences; R-hat <= 1.01 and effective sample sizes adequate "
 	                                 "for every global parameter"])
-	return "\n".join(out)
+	return "\n".join(out), global_table(raw, names, K, extra_cols=("n_eff", "r_hat"))

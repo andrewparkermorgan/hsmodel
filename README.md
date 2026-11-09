@@ -22,7 +22,8 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
 ## Commands
 
     hsmodel simulate    [--parents 1500] [--meioses 3] [--chrom-lengths LIST|FILE]
-                        [--a-p ...] [--b-p 0.4,-0.3] ... [--no-chrom-effects] [--seed 1] [--out sim.npz]
+                        [--a-p ...] [--b-p 0.4,-0.3] ... [--binary [--proportion 0.5]]
+                        [--no-chrom-effects] [--seed 1] [--out sim.npz]
     hsmodel preprocess  -m MAP [-i CROSSOVERS | -] -o data.npz [--cM]
     hsmodel infer       --data data.npz [--covariates covariates.txt] [--coefficients age,2]
                         [--steps N] [--guide-type meanfield|lowrank] [--lr 0.02] [--rank 4]
@@ -40,7 +41,10 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
 
 * **simulate** draws a dataset from the model, prints a summary (with
   stem-and-leaf plots of crossovers per meiotic product and of inter-crossover
-  distances) and writes it as `.npz`.
+  distances) and writes it as `.npz`. Covariates are standard normal, or
+  with `--binary` Bernoulli coded 0/1, with P(z = 1) given by `--proportion`
+  (one value for all covariates, or one per covariate; default 0.5). Binary
+  covariates are not standardized, so `infer` and `nuts` warn about them.
 * **preprocess** reads tab-separated crossover data (`individual, sex,
   chromosome, [positions]`) and a sex-specific map (`sex, chromosome,
   length`), and writes the same `.npz` format with the same summary.

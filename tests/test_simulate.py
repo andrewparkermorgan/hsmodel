@@ -88,7 +88,40 @@ def test_covariate_coefficients(tmp_path):
 	assert "parent covariates:" in res.stdout
 
 
+def test_binary_covariates_library():
+	"""Bernoulli(q) covariates coded 0/1, one q per covariate or one for all."""
+	truth = dict(DEFAULT_TRUTH, b_p=np.array([0.4, -0.3]), b_nu=np.array([0.0, 0.2]))
+	d = simulate_dataset(P=4000, meioses=1, chrom_len=[0.5], truth=truth, seed=2, binary=True,
+	                     proportion=[0.2, 0.7])
+	assert set(np.unique(d["z"])) == {0.0, 1.0}
+	assert d["z"].mean(0) == pytest.approx([0.2, 0.7], abs=0.025)
+	assert d["z_binary"] and np.allclose(d["z_proportion"], [0.2, 0.7])
+	d = simulate_dataset(P=20, meioses=1, chrom_len=[0.5], truth=truth, seed=2, binary=True, proportion=0.4)
+	assert np.allclose(d["z_proportion"], [0.4, 0.4])
+	assert "z_binary" not in simulate_dataset(P=5, meioses=1, chrom_len=[0.5], seed=2)
+
+
+def test_binary_covariates_cli(tmp_path):
+	out = tmp_path / "b.npz"
+	res = run_cli(["simulate", "--parents", "30", "--meioses", "1", "--b-p", "0.4,-0.3", "--binary",
+	               "--proportion", "0.25,0.5", "--out", out])
+	assert res.returncode == 0, res.stderr
+	s = load_dataset(out)
+	assert set(np.unique(s["z"])) <= {0.0, 1.0} and bool(s["z_binary"])
+	assert np.allclose(s["z_proportion"], [0.25, 0.5])
+	res = run_cli(["inspect", out])
+	assert res.returncode == 0, res.stderr
+	assert "binary (0/1): z1 (P(1) = 0.25" in res.stdout
+	# default proportion 0.5
+	res = run_cli(["simulate", "--parents", "5", "--meioses", "1", "--binary", "--out", out])
+	assert res.returncode == 0, res.stderr
+	assert np.allclose(load_dataset(out)["z_proportion"], [0.5])
+
+
 @pytest.mark.parametrize("args, message", [
+	(["--proportion", "0.3"], "--proportion applies only with --binary"),
+	(["--binary", "--proportion", "1"], "strictly between 0 and 1"),
+	(["--binary", "--proportion", "0.2,0.3"], "2 proportions given for 1 covariates"),
 	(["--b-p", "0.4,0.1", "--b-nu", "1,2,3"], "b_p has 2 coefficients but b_nu has 3"),
 	(["--parents", "0"], "must be at least 1"),
 	(["--s-p", "-1"], "--s-p must be non-negative"),

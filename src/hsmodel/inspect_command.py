@@ -218,8 +218,13 @@ def simulation_settings(d):
 		z = np.asarray(d["z"], dtype=float)
 		z = z[:, None] if z.ndim == 1 else z
 		names = [f"z{k + 1}" for k in range(z.shape[1])]          # as `hsmodel infer` names them
-		pairs.append(("covariates", ", ".join(f"{n} (mean {m:.3f}, SD {s:.3f})"
-		                                      for n, m, s in zip(names, z.mean(0), z.std(0)))))
+		if d.get("z_binary", False):
+			q = np.atleast_1d(d["z_proportion"])
+			pairs.append(("covariates", "binary (0/1): " + ", ".join(
+				f"{n} (P(1) = {qk:.3g}; observed {m:.3f})" for n, qk, m in zip(names, q, z.mean(0)))))
+		else:
+			pairs.append(("covariates", "standard normal: " + ", ".join(
+				f"{n} (mean {m:.3f}, SD {s:.3f})" for n, m, s in zip(names, z.mean(0), z.std(0)))))
 	lines.append(fields(pairs))
 	if t:
 		rows = [["parameter", "value", "description"]]

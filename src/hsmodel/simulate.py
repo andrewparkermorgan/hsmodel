@@ -5,11 +5,14 @@ parent and chromosome random effects (`hsmodel simulate`).
 Terminology: a meiotic product is one simulated chromosome in one individual
 (one chromosome of one gamete), i.e. one record of the output.
 
-For parent i with K standardized covariates z_i ~ N(0, I_K) and chromosome c:
+For parent i with K covariates z_i and chromosome c:
     logit p_ic      = a_p  + z_i . b_p  + s_p  * e_p_i  + c_p_c,    e_p_i, e_nu_i ~ N(0, 1)
     log(nu_ic - 1)  = a_nu + z_i . b_nu + s_nu * e_nu_i + c_nu_c,   c_p_c ~ N(0, t_p^2), c_nu_c ~ N(0, t_nu^2)
 K is the length of b_p (a scalar b_p means K = 1; a scalar b_nu is repeated K
-times).  Each parent contributes `meioses` meiotic products for every
+times).  The covariates are standard normal, z_i ~ N(0, I_K), or with
+--binary independent Bernoulli(q_k) coded 0/1, q_k given by --proportion (one
+value for every covariate, or one per covariate); binary covariates are not
+standardized, so b_p and b_nu are the effects of z = 1 against z = 0.  Each parent contributes `meioses` meiotic products for every
 chromosome, so the dataset has parents x meioses x chromosomes meiotic
 products.  Crossovers on a meiotic product follow simulate_product (gamma
 renewal chiasmata plus a Poisson escape pathway, each chiasma seen in the
@@ -18,6 +21,7 @@ product with probability 1/2).
 Command line:
     hsmodel simulate [--parents 1500] [--meioses 3]
                      [--chrom-lengths 0.6,0.7,... | FILE] [--a-p ...] ... [--t-nu ...]
+                     [--binary [--proportion 0.5]]
                      [--no-chrom-effects] [--seed 1] [--out simulated_data.npz]
   --chrom-lengths FILE: one chromosome per line as a (name, length in Morgans)
   tuple, e.g. "(chr1, 2.70)", "chr1, 2.70", "chr1 2.70" or tab-separated;
@@ -70,7 +74,7 @@ def simulate_product(nu, p, L, rng, burn=10.0, return_labels=False):
 
 
 def simulate_dataset(P=1500, meioses=3, chrom_len=DEFAULT_CHROM_LEN, truth=DEFAULT_TRUTH, seed=1,
-                     chrom_effects=True, chrom_names=None):
+                     chrom_effects=True, chrom_names=None, binary=False, proportion=0.5):
 	"""Simulate the dataset.  Returns a dict with the padded records (X, NXO,
 	LEN; one record = one meiotic product, i.e. one chromosome in one
 	individual; parents x meioses x chromosomes records), each record's parent,
@@ -79,6 +83,10 @@ def simulate_dataset(P=1500, meioses=3, chrom_len=DEFAULT_CHROM_LEN, truth=DEFAU
 	parent-level p_i and nu_i (at a chromosome effect of 0), the true
 	chromosome effects c_p and c_nu, the per-(parent, chromosome) p_ic and
 	nu_ic, chrom_len, chrom_names, P and meioses.
+
+	Covariates: standard normal, or with binary=True Bernoulli(proportion)
+	coded 0/1 (proportion a scalar or one value per covariate); binary
+	datasets also carry z_binary and z_proportion [K].
 
 	Random streams: parents' covariates and effects, then all crossovers, come
 	from default_rng(seed); chromosome effects from default_rng(seed + 1000),
@@ -92,7 +100,11 @@ def simulate_dataset(P=1500, meioses=3, chrom_len=DEFAULT_CHROM_LEN, truth=DEFAU
 	rng_c = np.random.default_rng(seed + 1000)
 	b_p, b_nu = coefficient_vectors(truth)
 	K = b_p.size
-	z = rng.standard_normal((P, K))            # K = 1: the same draws as standard_normal(P)
+	if binary:
+		q = covariate_proportions(proportion, K)
+		z = (rng.random((P, K)) < q).astype(float)
+	else:
+		z = rng.standard_normal((P, K))        # K = 1: the same draws as standard_normal(P)
 	lp = truth["a_p"] + z @ b_p + truth["s_p"] * rng.standard_normal(P)
 	ln = truth["a_nu"] + z @ b_nu + truth["s_nu"] * rng.standard_normal(P)
 	if chrom_effects:
@@ -109,9 +121,24 @@ def simulate_dataset(P=1500, meioses=3, chrom_len=DEFAULT_CHROM_LEN, truth=DEFAU
 				xo.append(simulate_product(nu_ic[i, c], p_ic[i, c], L, rng))
 				lens.append(L); par.append(i); rep.append(m); chrom.append(c)
 	X, NXO, LEN = pad_records(xo, lens)
-	return dict(X=X, NXO=NXO, LEN=LEN, par=np.array(par), replicate=np.array(rep), chrom=np.array(chrom), z=z,
-	            p_i=1 / (1 + np.exp(-lp)), nu_i=1 + np.exp(ln), c_p=c_p, c_nu=c_nu, p_ic=p_ic, nu_ic=nu_ic,
-	            chrom_len=chrom_len, chrom_names=np.array(chrom_names), P=P, meioses=meioses)
+	d = dict(X=X, NXO=NXO, LEN=LEN, par=np.array(par), replicate=np.array(rep), chrom=np.array(chrom), z=z,
+	         p_i=1 / (1 + np.exp(-lp)), nu_i=1 + np.exp(ln), c_p=c_p, c_nu=c_nu, p_ic=p_ic, nu_ic=nu_ic,
+	         chrom_len=chrom_len, chrom_names=np.array(chrom_names), P=P, meioses=meioses)
+	if binary:
+		d.update(z_binary=True, z_proportion=q)
+	return d
+
+
+def covariate_proportions(proportion, K):
+	"""Bernoulli probabilities as a K-vector; a single value is repeated K times."""
+	q = np.atleast_1d(np.asarray(proportion, dtype=float))
+	if q.size == 1:
+		q = np.full(K, q[0])
+	if q.size != K:
+		raise ValueError(f"{q.size} proportions given for {K} covariates")
+	if np.any((q <= 0) | (q >= 1)):
+		raise ValueError("proportions must be strictly between 0 and 1")
+	return q
 
 
 def coefficient_vectors(truth):
@@ -186,6 +213,11 @@ def add_arguments(ap):
 			                     + ("; a single --b-nu value is repeated K times" if k == "b_nu" else ""))
 		else:
 			ap.add_argument(f"--{k.replace('_', '-')}", type=float, default=v, help=f"default {v:.4g}")
+	ap.add_argument("--binary", action="store_true",
+	                help="draw the covariates from a Bernoulli distribution (coded 0/1) instead of N(0, 1)")
+	ap.add_argument("--proportion", default=None,
+	                help="with --binary, the probability that a covariate is 1: one value for every covariate, "
+	                     "or comma-separated, one per covariate (default 0.5)")
 	ap.add_argument("--no-chrom-effects", action="store_true", help="set all chromosome effects to 0")
 	ap.add_argument("--seed", type=int, default=1)
 	ap.add_argument("--out", default="simulated_data.npz")
@@ -211,7 +243,17 @@ def run(a):
 		truth["b_p"], truth["b_nu"] = coefficient_vectors(truth)
 	except ValueError as e:
 		raise CommandError(f"--b-p / --b-nu: {e}") from None
-	d = simulate_dataset(a.parents, a.meioses, lens, truth, a.seed, not a.no_chrom_effects, names)
+	if a.proportion is not None and not a.binary:
+		raise CommandError("--proportion applies only with --binary")
+	proportion = 0.5
+	if a.binary:
+		try:
+			proportion = covariate_proportions([float(v) for v in str(a.proportion or "0.5").split(",")
+			                                    if v.strip()], truth["b_p"].size)
+		except ValueError as e:
+			raise CommandError(f"--proportion: {e}") from None
+	d = simulate_dataset(a.parents, a.meioses, lens, truth, a.seed, not a.no_chrom_effects, names,
+	                     binary=a.binary, proportion=proportion)
 	print(summarize_dataset(d))
 	save_dataset(a.out, d, truth, a.seed, not a.no_chrom_effects)
 	print(f"\nwritten to {a.out}")

@@ -69,7 +69,10 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
   the spread of the individual effects. For a fit, `--out FILE` also writes
   the table of global parameters on the fitted scale (posterior mean, SD and
   95% interval, plus n_eff and R-hat for NUTS) to FILE, tab-separated with a
-  header line. Datasets and SVI fits are read without importing JAX.
+  header line. For an SVI fit of simulated data, `infer` stores the true
+  values in `PREFIX_params.npz`, and `inspect` shows them in a truth column
+  (on screen and in the `--out` file) and beside the chromosome effects.
+  Datasets and SVI fits are read without importing JAX.
 
 For simulated data (`hsmodel simulate`), `infer` and `nuts` take the
 covariate values from the data file, so no covariate file is needed. The

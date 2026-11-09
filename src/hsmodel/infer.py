@@ -110,9 +110,13 @@ def run(a):
 	cs = chrom_summary(params)
 	if cs:
 		print("\n" + chrom_table(cs, d["chrom_names"], f.truth_chrom))
+	# simulated data: the true values (fitted scale) as truth_<site>, and truth_c_p / truth_c_nu
+	truth_keys = {f"truth_{k}": np.asarray(v, dtype=float) for k, v in (f.truth or {}).items()}
+	truth_keys.update({f"truth_{k}": np.asarray(v, dtype=float) for k, v in (f.truth_chrom or {}).items()})
 	np.savez(f"{a.out}_params.npz", **params, individual_ids=np.array(f.iids), covariate_names=np.array(names),
 	         chrom_names=np.asarray(d["chrom_names"]), covariate_means=f.means, covariate_sds=f.sds,
-	         standardized=a.standardize, losses=losses, likelihood_exact=a.exact, likelihood_K=K_terms)
+	         standardized=a.standardize, losses=losses, likelihood_exact=a.exact, likelihood_K=K_terms,
+	         **truth_keys)
 	plot = plot_summary(params, losses, f"{a.out}_summary.png", truth=f.truth, truth_chrom=f.truth_chrom,
 	                    covariate_names=names, chrom_names=list(d["chrom_names"]),
 	                    title=f"Housworth-Stahl SVI fit ({a.guide_type} guide): {P} individuals, "

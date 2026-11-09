@@ -185,6 +185,17 @@ def test_simulated_covariates_used_without_file(simulated):
 	assert chrom_head[-1] == "true_effect_on_log_nu_minus_1"
 	p = np.load(tmp / "s1_params.npz")
 	assert list(p["individual_ids"][:3]) == ["0", "1", "2"]
+	# the true values are stored on the fitted scale, restricted to the selected covariate
+	assert p["truth_b_p"] == pytest.approx([-0.3]) and p["truth_b_nu"] == pytest.approx([0.2])
+	assert float(p["truth_a_nu"]) == pytest.approx(float(rows["a_nu"][-1]), abs=1e-5)
+	assert np.shape(p["truth_c_p"]) == np.shape(p["c_p_loc"])
+	# ... and `inspect` shows them, on screen and in --out
+	r2 = run_cli(["inspect", tmp / "s1_params.npz", "--out", tmp / "s1_globals.tsv"])
+	assert r2.returncode == 0, r2.stderr
+	assert "true_c_nu" in r2.stdout
+	out = [l.split("\t") for l in (tmp / "s1_globals.tsv").read_text().splitlines()]
+	assert out[0][-1] == "truth"
+	assert float(dict((l[0], l[-1]) for l in out[1:])["b_p[z2]"]) == pytest.approx(-0.3)
 	# implied nu at the intercept, at the end of stderr
 	tail = r.stderr.rsplit("implied nu at the intercept", 1)[1]
 	assert "all covariates = 0, chromosome and individual effects at their mean (0)" in tail
@@ -212,6 +223,7 @@ def test_simulated_covariates_override_file(simulated, setup):
 	assert r.returncode == 0, r.stderr[-2000:]
 	assert "is ignored" in r.stderr and "2 covariate(s): z1, z2" in r.stderr
 	assert "truth" not in r.stdout.splitlines()[2]          # re-standardized: different scale, no truth
+	assert not [k for k in np.load(tmp / "s2_params.npz").files if k.startswith("truth_")]
 
 
 def test_covariate_file_required_for_empirical_data(setup):

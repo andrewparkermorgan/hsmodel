@@ -25,8 +25,10 @@ META = dict(individual_ids=IDS, covariate_names=np.array(["age", "parity"]), chr
 LOC = {"a_p": -2.8, "log_s_p": -1.2, "log_t_p": -1.5, "a_nu": 2.3, "log_s_nu": -1.9, "log_t_nu": -1.6}
 
 
-def svi_params(chrom_effects=True, parent_effects=True, meta=True):
-	"""A mean-field `hsmodel infer` output, as written by infer.run."""
+def svi_params(chrom_effects=True, parent_effects=True, meta=True, truth=False):
+	"""A mean-field `hsmodel infer` output, as written by infer.run; with
+	truth, the true values infer stores for simulated data (log_s_nu missing,
+	as for an SD simulated as 0)."""
 	rng = np.random.default_rng(0)
 	f = {}
 	for n in GLOBALS:
@@ -45,6 +47,11 @@ def svi_params(chrom_effects=True, parent_effects=True, meta=True):
 	if meta:
 		f.update(META, losses=np.linspace(3000, 2500, 400) + rng.normal(0, 5, 400), likelihood_exact=False,
 		         likelihood_K=20)
+	if truth:
+		f.update(truth_a_p=np.array(-2.75), truth_b_p=np.array([0.4, -0.3]), truth_log_s_p=np.array(-1.2),
+		         truth_log_t_p=np.array(-1.5), truth_a_nu=np.array(2.3), truth_b_nu=np.array([0.0, 0.2]),
+		         truth_log_t_nu=np.array(-1.6), truth_c_p=np.linspace(-0.2, 0.2, C),
+		         truth_c_nu=np.linspace(0.3, -0.3, C))
 	return f
 
 
@@ -83,6 +90,7 @@ def files(tmp_path_factory):
 	assert res.returncode == 0, res.stderr
 	np.savez(tmp / "svi_params.npz", **svi_params())
 	np.savez(tmp / "svi_plain_params.npz", **svi_params(chrom_effects=False, parent_effects=False))
+	np.savez(tmp / "svi_truth_params.npz", **svi_params(truth=True))
 	np.savez(tmp / "nuts_svi_params.npz", **svi_params(meta=False))
 	np.savez(tmp / "nuts_samples.npz", **nuts_samples())
 	np.savez(tmp / "nuts_bad_samples.npz", **nuts_samples(divergent=3, bad=True))
@@ -199,6 +207,33 @@ def test_out_global_table(files, tmp_path, name, keys):
 	if not nuts:
 		assert v["a_p"][:2] == pytest.approx([-2.8, 0.1])
 		assert v["b_p[parity]"][:2] == pytest.approx([-0.2, 0.12])
+
+
+def test_truth_shown(files, tmp_path):
+	"""True values stored by infer appear on screen and in --out; NA where unknown."""
+	out = tmp_path / "globals.tsv"
+	res = run_cli(["inspect", files / "svi_truth_params.npz", "--out", out])
+	assert res.returncode == 0, res.stderr
+	lines = res.stdout.splitlines()
+	head = next(l for l in lines if l.strip().startswith("parameter"))
+	assert head.split()[5] == "truth"
+	row = lambda key: next(l for l in lines if l.strip().startswith(key + " ")).split()
+	assert row("b_p[parity]")[5] == "-0.3000" and row("log_s_nu")[5] == "NA"
+	chrom_head = next(l for l in lines if l.split()[:2] == ["chromosome", "c_p"])
+	assert chrom_head.split()[-2:] == ["true_c_p", "true_c_nu"]
+	assert row("chrD")[-2:] == ["+0.200", "-0.300"]
+	rows = [l.split("\t") for l in out.read_text().splitlines()]
+	assert rows[0] == ["parameter", "mean", "sd", "lower95", "upper95", "truth"]
+	t = {r[0]: r[-1] for r in rows[1:]}
+	assert float(t["a_p"]) == -2.75 and float(t["b_nu[parity]"]) == 0.2 and t["log_s_nu"] == "NA"
+
+
+def test_no_truth_column_without_truth(files, tmp_path):
+	out = tmp_path / "globals.tsv"
+	res = run_cli(["inspect", files / "svi_params.npz", "--out", out])
+	assert res.returncode == 0, res.stderr
+	assert "truth" not in res.stdout and "true_c_p" not in res.stdout
+	assert "truth" not in out.read_text()
 
 
 def test_out_rejected_for_dataset(files, tmp_path):

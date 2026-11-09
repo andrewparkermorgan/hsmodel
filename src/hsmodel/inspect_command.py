@@ -22,6 +22,10 @@ writes the table of global parameters on the fitted scale (logit p,
 log(nu - 1), log SDs, coefficients): posterior mean, SD and 95% interval,
 and for NUTS also n_eff and R-hat, tab-separated with a header line.
 
+An SVI fit of simulated data from `hsmodel infer` stores the true values
+(truth_<site>, truth_c_p, truth_c_nu); they are then shown in a truth column,
+on screen and in the --out file.
+
 Example:
     hsmodel inspect simulated_data.npz
     hsmodel inspect svi_fit_params.npz --out svi_fit_globals.tsv
@@ -34,8 +38,8 @@ import numpy as np
 
 from .data import load_dataset, summarize_dataset
 from .errors import CommandError, InputError
-from .summaries import (GLOBALS, default_covariate_names, global_entries, entry_value, summarize, chrom_summary,
-                        chrom_draw_summary)
+from .summaries import (GLOBALS, default_covariate_names, global_entries, entry_value, expand_truth, summarize,
+                        chrom_summary, chrom_draw_summary)
 
 DATASET_KEYS = ("X", "NXO", "LEN", "par", "chrom", "chrom_len", "P")
 
@@ -91,15 +95,25 @@ def write_table(path, rows):
 		fh.write("".join("\t".join(r) + "\n" for r in rows))
 
 
-def global_table(summ, names, K, extra_cols=()):
+def global_table(summ, names, K, extra_cols=(), truth_x=None):
 	"""The globals on the fitted scale for --out: rows of strings, header first, no description;
-	summ: {key: (mean, sd, lo, hi, *extra)} with extra numeric."""
-	rows = [["parameter", "mean", "sd", "lower95", "upper95", *extra_cols]]
+	summ: {key: (mean, sd, lo, hi, *extra)} with extra numeric; truth_x: {key: true value}
+	or None (adds a truth column, NA where unknown)."""
+	rows = [["parameter", "mean", "sd", "lower95", "upper95", *extra_cols] + (["truth"] if truth_x else [])]
 	present = [n for n in GLOBALS if any(key == n or key.startswith(n + "[") for key in summ)]
 	for key, *_ in global_entries(present, K, names):
 		if key in summ:
-			rows.append([key] + [num(x, 6) for x in summ[key]])
+			rows.append([key] + [num(x, 6) for x in summ[key]] +
+			            ([num(truth_x[key], 6) if key in truth_x else "NA"] if truth_x else []))
 	return rows
+
+
+def stored_truth(f, K, names):
+	"""(truth_x, truth_chrom) from the truth_* keys `hsmodel infer` writes for
+	simulated data: {display key: true value} and {c_p / c_nu: [C]}; None if absent."""
+	t = {n: f[f"truth_{n}"] for n in GLOBALS if f"truth_{n}" in f}
+	chrom = {n: np.asarray(f[f"truth_{n}"], dtype=float) for n in ("c_p", "c_nu") if f"truth_{n}" in f}
+	return expand_truth(t, K, names) if t else None, chrom if len(chrom) == 2 else None
 
 
 # ---------------------------------------------------------------------------
@@ -282,14 +296,17 @@ def fit_settings(f, sites, P, C, extra=()):
 	return names, fields(pairs + list(extra))
 
 
-def global_rows(summ, names, K, extra_cols=()):
-	"""Aligned table of the globals; summ: {key: (mean, sd, lo, hi, *extra)}."""
-	rows = [["parameter", "mean", "sd", "lower95", "upper95", *extra_cols, "description"]]
+def global_rows(summ, names, K, extra_cols=(), truth_x=None):
+	"""Aligned table of the globals; summ: {key: (mean, sd, lo, hi, *extra)};
+	truth_x: {key: true value} or None (adds a truth column)."""
+	rows = [["parameter", "mean", "sd", "lower95", "upper95", *extra_cols] + (["truth"] if truth_x else [])
+	        + ["description"]]
 	present = [n for n in GLOBALS if any(key == n or key.startswith(n + "[") for key in summ)]
 	for key, site, k, label in global_entries(present, K, names):
 		if key in summ:
 			v = summ[key]
-			rows.append([key] + [f"{x:.4f}" for x in v[:4]] + [str(x) for x in v[4:]] + [label])
+			truth = ([f"{truth_x[key]:.4f}" if key in truth_x else "NA"] if truth_x else [])
+			rows.append([key] + [f"{x:.4f}" for x in v[:4]] + [str(x) for x in v[4:]] + truth + [label])
 	return "Global parameters (posterior, on the fitted scale):\n" + align(rows)
 
 
@@ -302,15 +319,18 @@ def natural_rows(draws_or_normal):
 	return "Natural scale:\n" + align(rows) + "\n  " + INTERCEPT_NOTE
 
 
-def chrom_rows(cs, chrom_names):
-	"""Aligned table of the chromosome effects; cs: {c_p / c_nu: (mean, lo, hi)}."""
+def chrom_rows(cs, chrom_names, truth_chrom=None):
+	"""Aligned table of the chromosome effects; cs: {c_p / c_nu: (mean, lo, hi)};
+	truth_chrom: {c_p / c_nu: [C]} or None (adds true_c_p, true_c_nu columns)."""
 	C = len(cs["c_p"][0])
 	chrom_names = chrom_names or [str(c + 1) for c in range(C)]
-	rows = [["chromosome", "c_p", "lower95", "upper95", "c_nu", "lower95", "upper95"]]
+	rows = [["chromosome", "c_p", "lower95", "upper95", "c_nu", "lower95", "upper95"]
+	        + (["true_c_p", "true_c_nu"] if truth_chrom else [])]
 	for c in range(C):
-		rows.append([str(chrom_names[c])] + [f"{v[j][c]:+.3f}" for v in (cs["c_p"], cs["c_nu"]) for j in range(3)])
+		rows.append([str(chrom_names[c])] + [f"{v[j][c]:+.3f}" for v in (cs["c_p"], cs["c_nu"]) for j in range(3)]
+		            + ([f"{truth_chrom[n][c]:+.3f}" for n in ("c_p", "c_nu")] if truth_chrom else []))
 	return ("Chromosome effects (posterior mean and 95% interval; c_p on logit p, c_nu on log(nu - 1)):\n"
-	        + align(rows, right=range(1, 7)))
+	        + align(rows, right=range(1, len(rows[0]))))
 
 
 def individual_lines(means, sds, ids, site_scale):
@@ -351,18 +371,21 @@ def describe_svi(path, f):
 	what = ("SVI fit from `hsmodel nuts --svi-init` (the starting point of the NUTS chains)" if from_nuts
 	        else "SVI fit from `hsmodel infer`")
 	summ = summarize(f, names)
-	out = [f"{path}: {what}", "", "Settings:", settings, "", global_rows(summ, names, K), "",
+	truth_x, truth_chrom = stored_truth(f, K, names)
+	out = [f"{path}: {what}", "", "Settings:", settings, "", global_rows(summ, names, K, truth_x=truth_x), "",
 	       natural_rows({s: normal_natural(f, s, tr) for s, _, _, tr in NATURAL if f"{s}_loc" in f})]
 	if lowrank and "glob_corr" in f:
 		out += ["", posterior_correlations(f["glob_corr"], [key for key, *_ in global_entries(sites, K, names)])]
 	cs = chrom_summary(f)
 	if cs:
-		out += ["", chrom_rows(cs, strings(f, "chrom_names"))]
+		out += ["", chrom_rows(cs, strings(f, "chrom_names"), truth_chrom)]
 	if "e_p_loc" in f:
 		out += ["", individual_lines((f["e_p_loc"], f["e_nu_loc"]), (f["e_p_scale"], f["e_nu_scale"]),
 		                             strings(f, "individual_ids"), ("logit p", "log(nu - 1)"))]
 	out += ["", "Intervals are mean +/- 1.96 SD of the variational posterior (approximate)."]
-	return "\n".join(out), global_table(summ, names, K)
+	if truth_x:
+		out += ["True values (truth) are those the data were simulated with, as stored by `hsmodel infer`."]
+	return "\n".join(out), global_table(summ, names, K, truth_x=truth_x)
 
 
 def normal_natural(f, site, transform, n_nodes=64):

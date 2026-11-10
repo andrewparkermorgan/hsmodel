@@ -9,7 +9,8 @@ Inputs:
   --coefficients LIST   covariates to include (default: all)
 
 Outputs (prefix --out): OUT_params.npz (guide parameters, plus the names of the
-individuals, covariates and chromosomes, and any standardization used),
+individuals, covariates and chromosomes, the covariate values fitted (after
+any standardization) and the standardization used; `hsmodel extract` reads it),
 OUT_summary.png, and tables of posterior summaries on stdout (with the true
 values for simulated data).  Progress and the data summary go to stderr.
 
@@ -37,6 +38,8 @@ def add_arguments(ap):
 	                     "individual; with --no-parent-effects there are no per-individual parameters and "
 	                     "fewer steps usually suffice)")
 	ap.add_argument("--guide-type", choices=["meanfield", "lowrank"], default="meanfield")
+	ap.add_argument("--verbose", action="store_true",
+				 	help="print the loss at each step (default: only every 10% of steps)")
 	ap.add_argument("--lr", type=float, default=0.02, help="learning rate (default 0.02)")
 	ap.add_argument("--rank", type=int, default=4, help="rank of the low-rank guide's covariance (default 4)")
 	ap.add_argument("--seed", type=int, default=0)
@@ -91,10 +94,11 @@ def run(a):
 
 	bt = ParentBatcher(d["X"], d["NXO"], d["chrom"], d["par"], P, d["chrom_len"], batch=batch,
 	                   seed=a.seed, parent_lengths=parent_lengths_of(d))
+	log_every = 1 if a.verbose else max(1, steps // 10)
 	with warnings.catch_warnings():
 		warnings.simplefilter("always")
 		warnings.showwarning = lambda msg, *args, **kw: print(f"warning: {msg}", file=sys.stderr)
-		params, losses = fit(bt, f.z, steps=steps, lr=a.lr, seed=a.seed, log_every=max(1, steps // 10),
+		params, losses = fit(bt, f.z, steps=steps, lr=a.lr, seed=a.seed, log_every=log_every,
 		                     chrom_effects=a.chrom_effects, guide_type=a.guide_type, rank=a.rank,
 		                     covariate_names=names, log=sys.stderr, parent_effects=a.parent_effects,
 		                     K_terms=K_terms, exact=a.exact)
@@ -114,6 +118,7 @@ def run(a):
 	truth_keys = {f"truth_{k}": np.asarray(v, dtype=float) for k, v in (f.truth or {}).items()}
 	truth_keys.update({f"truth_{k}": np.asarray(v, dtype=float) for k, v in (f.truth_chrom or {}).items()})
 	np.savez(f"{a.out}_params.npz", **params, individual_ids=np.array(f.iids), covariate_names=np.array(names),
+	         covariate_values=np.asarray(f.z, dtype=float),
 	         chrom_names=np.asarray(d["chrom_names"]), covariate_means=f.means, covariate_sds=f.sds,
 	         standardized=a.standardize, losses=losses, likelihood_exact=a.exact, likelihood_K=K_terms,
 	         **truth_keys)

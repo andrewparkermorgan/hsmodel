@@ -38,6 +38,8 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
                         [--chrom-effects | --no-chrom-effects] [--parent-effects | --no-parent-effects]
                         [--standardize] [--out PREFIX]
     hsmodel inspect     FILE.npz [--out FILE]
+    hsmodel extract     PREFIX_params.npz [--per-chromosome] [--draws 4000] [--seed 0]
+                        [--data data.npz [--covariates covariates.txt]]
 
 * **simulate** draws a dataset from the model, prints a summary (with
   stem-and-leaf plots of crossovers per meiotic product and of inter-crossover
@@ -77,6 +79,18 @@ This installs the `hsmodel` command, which can also be run as `python -m hsmodel
   values in `PREFIX_params.npz`, and `inspect` shows them in a truth column
   (on screen and in the `--out` file) and beside the chromosome effects.
   Datasets and SVI fits are read without importing JAX.
+* **extract** gives the implied nu and p of every individual in an SVI fit
+  (`infer`'s `PREFIX_params.npz`). It draws all parameters jointly from the
+  variational posterior (for the low-rank guide, with the correlations it
+  models), computes each individual's linear predictors
+  `a + z_i . b + s e_i` draw by draw, back-transforms them to nu and p, and
+  writes a tab-separated table to stdout: per individual, the posterior mean,
+  median and 95% interval of nu and of p. The chromosome effects are set to 0
+  unless `--per-chromosome` is given, which writes one row per individual and
+  chromosome with the chromosome effects added. Fits from this version of
+  `infer` store the covariate values they were fitted with; for older fits
+  give the dataset with `--data` (and the covariate file with `--covariates`).
+  It does not import JAX.
 
 For simulated data (`hsmodel simulate`), `infer` and `nuts` take the
 covariate values from the data file, so no covariate file is needed. The
@@ -109,6 +123,7 @@ Example:
     hsmodel infer --data sim.npz --out sim_svi
     hsmodel nuts --data sim.npz --parents 50 --chains 2 --warmup 400 --samples 400 --svi-init --out sim_nuts
     hsmodel inspect sim_svi_params.npz
+    hsmodel extract sim_svi_params.npz --per-chromosome > sim_nu_p.tsv
 
 ## Package layout
 
@@ -127,9 +142,10 @@ Example:
 | `hsmodel.nuts` | full-data NUTS model and sampler |
 | `hsmodel.nuts_command` | the `hsmodel nuts` command |
 | `hsmodel.inspect_command` | the `hsmodel inspect` command |
+| `hsmodel.extract` | the `hsmodel extract` command: per-individual nu and p from an SVI fit |
 | `hsmodel.plots` | SVI and NUTS summary plots |
 
-`simulate`, `preprocess` and `inspect` (except for NUTS fits) do not import JAX, and `nuts` imports it only after
+`simulate`, `preprocess`, `extract` and `inspect` (except for NUTS fits) do not import JAX, and `nuts` imports it only after
 setting the device count that `--chain-method parallel` needs.
 
 `examples/` holds scripts that are not part of the command-line interface:
@@ -149,7 +165,7 @@ setting the device count that `--chain-method parallel` needs.
 The tests cover the likelihood (against simulation, closed forms and
 brute-force enumeration of labellings), the grouped likelihoods and their
 gradients, minibatching, sex-specific map lengths, the model and guides, and
-the five commands end to end.
+the six commands end to end.
 
 ## Credits
 

@@ -6,6 +6,7 @@ Command-line interface:
     hsmodel infer        fit the model to a dataset with SVI
     hsmodel nuts         fit the model to a dataset with NUTS (full Bayesian)
     hsmodel inspect      describe a dataset or a fit (.npz file)
+    hsmodel extract      implied nu and p for every individual, from an SVI fit
 
 `hsmodel COMMAND --help` describes each command's options.  The same commands
 run as `python -m hsmodel COMMAND`.
@@ -13,7 +14,7 @@ run as `python -m hsmodel COMMAND`.
 import argparse
 import sys
 
-from . import __version__, infer, inspect_command, nuts_command, preprocess, simulate
+from . import __version__, extract, infer, inspect_command, nuts_command, preprocess, simulate
 from .errors import CommandError
 
 COMMANDS = {
@@ -22,6 +23,8 @@ COMMANDS = {
 	"infer": (infer, "fit the model to a dataset with stochastic variational inference"),
 	"nuts": (nuts_command, "fit the model to a dataset with NUTS (full Bayesian; slow)"),
 	"inspect": (inspect_command, "describe a dataset or a model fit stored in an .npz file"),
+	"extract": (extract, "implied nu and p for every individual (posterior mean, median, 95%% interval) "
+	                     "from an SVI fit"),
 }
 
 
